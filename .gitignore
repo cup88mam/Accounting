@@ -1,0 +1,21 @@
+# Python 相關
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# VS Code 設定
+.vscode/
+
+# 環境變數 (這是之後存金鑰的好地方)
+.env
+
+# 其他
+.DS_Store
