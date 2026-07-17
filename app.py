@@ -303,7 +303,7 @@ def handle_message(event):
                     "contents": [
                         {
                             "type": "text",
-                            "text": "算帳工讀生選單",
+                            "text": "👊🏿討債工讀生選單👊🏿",
                             "weight": "bold",
                             "size": "lg",
                             "color": "#fbc02d"
