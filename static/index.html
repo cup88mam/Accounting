@@ -120,6 +120,7 @@
                 <div>
                     <div style="font-size: 14px; color: var(--text-sub);">群組總計</div>
                     <div style="font-size: 28px; font-weight: bold;" id="dash-total">$0</div>
+                    <div id="dash-members" style="font-size: 13px; color: var(--primary-yellow); margin-top: 8px; line-height: 1.4;">成員: 載入中...</div>
                 </div>
                 <div class="debt-ring">
                     <div class="debt-inner">
@@ -385,16 +386,27 @@
                 const urlParams = new URLSearchParams(window.location.search);
                 if(urlParams.get('invite_group')) await joinGroupViaInvite(urlParams.get('invite_group'));
 
-                // 載入群組資料（此函數預設會在最後呼叫 loadDashboardView()）
+                // 👇 核心修改：判斷是否在 LINE 群組/聊天室內開啟
+                const context = liff.getContext();
+                const lineGroupId = context ? (context.groupId || context.roomId) : null;
+                
+                if (lineGroupId) {
+                    // 如果在群組內開啟，自動將所有人綁定到該專屬群組
+                    const res = await fetch('/api/groups/line_bind', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ line_group_id: lineGroupId, user_id: currentUserId, user_name: currentUserName })
+                    });
+                    const bindData = await res.json();
+                    activeGroupId = bindData.group_id; // 強制切換至該專屬群組
+                }
+
                 await loadGroups();
                 
-                // 👉 核心修改：在群組載入完畢後，根據網址參數進行分頁智慧路由
                 const targetView = urlParams.get('view');
                 if (targetView) {
                     if (targetView === 'records') loadRecordsView();
                     else if (targetView === 'form') openAddForm();
                     else if (targetView === 'analytics') openAnalyticsPage();
-                    // 如果是 dashboard 則保持不變，因為 loadGroups 已經預設開啟首頁了
                 }
             } catch (err) { console.error("LIFF Error:", err); }
         };
@@ -582,6 +594,12 @@
             balEl.innerText = myBal >= 0 ? `+$${myBal}` : `-$${Math.abs(myBal)}`;
             balEl.style.color = myBal >= 0 ? "#06C755" : "#ff4444";
 
+            // 👇 新增這行：讀取回傳的 members_map 並更新到畫面上
+            const memberNames = Object.values(data.members_map).join(', ');
+            document.getElementById('dash-members').innerText = `成員: ${memberNames}`;
+
+            // (下方維持原樣的 debtHtml 與 actHtml...)
+
             let debtHtml = '';
             data.debts.forEach(d => {
                 debtHtml += `<div class="form-group" style="padding:15px 0; cursor:pointer;" onclick="initiateTransfer('${d.from}', '${d.to}', ${d.amount})">
@@ -641,13 +659,18 @@
             const groups = await res.json();
             if (groups.length > 0) {
                 if(!activeGroupId || !groups.find(g=>g.id === activeGroupId)) activeGroupId = groups[0].id;
-                document.getElementById('dash-group-name').innerText = groups.find(g=>g.id === activeGroupId).name;
+                
+                // 👇 美化目前顯示的群組名稱
+                const activeGroup = groups.find(g=>g.id === activeGroupId);
+                document.getElementById('dash-group-name').innerText = activeGroup.name.startsWith('LINE_') ? '💬 聊天室專屬群組' : activeGroup.name;
                 
                 let html = '';
                 groups.forEach(g => {
                     let border = g.id === activeGroupId ? 'border:1px solid var(--primary-yellow);' : '';
-                    html += `<div class="card" style="cursor:pointer; display:flex; justify-content:space-between; ${border}" onclick="selectGroup(${g.id}, '${g.name}')">
-                        <div style="font-weight:bold;">${g.name}</div><div style="color:var(--primary-yellow);">切換</div>
+                    // 👇 美化清單中的群組名稱
+                    let displayName = g.name.startsWith('LINE_') ? '💬 聊天室專屬群組' : g.name;
+                    html += `<div class="card" style="cursor:pointer; display:flex; justify-content:space-between; ${border}" onclick="selectGroup(${g.id}, '${displayName}')">
+                        <div style="font-weight:bold;">${displayName}</div><div style="color:var(--primary-yellow);">切換</div>
                     </div>`;
                 });
                 document.getElementById('group-list').innerHTML = html;
