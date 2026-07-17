@@ -391,13 +391,21 @@
                 const lineGroupId = context ? (context.groupId || context.roomId) : null;
                 
                 if (lineGroupId) {
-                    // 如果在群組內開啟，自動將所有人綁定到該專屬群組
-                    const res = await fetch('/api/groups/line_bind', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ line_group_id: lineGroupId, user_id: currentUserId, user_name: currentUserName })
-                    });
-                    const bindData = await res.json();
-                    activeGroupId = bindData.group_id; // 強制切換至該專屬群組
+                    try {
+                        const res = await fetch('/api/groups/line_bind', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ line_group_id: lineGroupId, user_id: currentUserId, user_name: currentUserName })
+                        });
+                        const bindData = await res.json();
+                        activeGroupId = bindData.group_id; 
+                        
+                        // 👇 加入這段提示：只有第一次進入群組時會彈出歡迎視窗
+                        if (bindData.is_new_join) {
+                            alert("✅ 綁定成功！您已自動加入本聊天室的專屬記帳群組！");
+                        }
+                    } catch (e) {
+                        console.error("自動綁定失敗", e);
+                    }
                 }
 
                 await loadGroups();
@@ -660,17 +668,22 @@
             if (groups.length > 0) {
                 if(!activeGroupId || !groups.find(g=>g.id === activeGroupId)) activeGroupId = groups[0].id;
                 
-                // 👇 美化目前顯示的群組名稱
+                // 直接顯示資料庫裡的名稱即可
                 const activeGroup = groups.find(g=>g.id === activeGroupId);
-                document.getElementById('dash-group-name').innerText = activeGroup.name.startsWith('LINE_') ? '💬 聊天室專屬群組' : activeGroup.name;
+                document.getElementById('dash-group-name').innerText = activeGroup.name;
                 
                 let html = '';
                 groups.forEach(g => {
                     let border = g.id === activeGroupId ? 'border:1px solid var(--primary-yellow);' : '';
-                    // 👇 美化清單中的群組名稱
-                    let displayName = g.name.startsWith('LINE_') ? '💬 聊天室專屬群組' : g.name;
-                    html += `<div class="card" style="cursor:pointer; display:flex; justify-content:space-between; ${border}" onclick="selectGroup(${g.id}, '${displayName}')">
-                        <div style="font-weight:bold;">${displayName}</div><div style="color:var(--primary-yellow);">切換</div>
+                    
+                    // 👇 加入了「改名」與「刪除」按鈕
+                    html += `
+                    <div class="card" style="display:flex; justify-content:space-between; align-items:center; ${border}">
+                        <div style="font-weight:bold; flex-grow:1; cursor:pointer;" onclick="selectGroup(${g.id}, '${g.name}')">${g.name}</div>
+                        <div style="display:flex; gap: 8px;">
+                            <button class="btn-action" style="padding:4px 10px; font-size:12px; border-color:#aaaaaa; color:#aaaaaa;" onclick="renameGroup(${g.id}, '${g.name}')">✏️ 改名</button>
+                            <button class="btn-action" style="padding:4px 10px; font-size:12px; border-color:#ff4444; color:#ff4444;" onclick="deleteGroup(${g.id}, '${g.name}')">🗑️ 刪除</button>
+                        </div>
                     </div>`;
                 });
                 document.getElementById('group-list').innerHTML = html;
@@ -999,6 +1012,41 @@
             
             // ===== 修改：刪除後返回原操作頁面 =====
             goBack();
+        }
+        async function renameGroup(id, currentName) {
+            const newName = prompt("請輸入新的群組名稱：", currentName);
+            if (!newName || newName === currentName) return;
+            
+            try {
+                await fetch(`/api/groups/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+                alert("名稱修改成功！");
+                
+                // 如果改的是當前群組，順便更新畫面上方的標題
+                if(id === activeGroupId) document.getElementById('dash-group-name').innerText = newName;
+                loadGroups();
+            } catch (e) {
+                alert("修改失敗");
+            }
+        }
+
+        async function deleteGroup(id, name) {
+            if (!confirm(`⚠️ 警告：確定要刪除「${name}」嗎？\n這將會永久刪除該群組內的所有記帳紀錄與成員，且無法復原！`)) return;
+            
+            try {
+                await fetch(`/api/groups/${id}`, { method: 'DELETE' });
+                alert("群組已成功刪除！");
+                
+                if (activeGroupId === id) {
+                    activeGroupId = null; // 清除當前群組狀態，讓系統重新抓取別的群組
+                }
+                loadGroups();
+            } catch (e) {
+                alert("刪除失敗");
+            }
         }
     </script>
 </body>

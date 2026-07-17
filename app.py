@@ -61,6 +61,8 @@ class LineGroupBind(BaseModel):
     line_group_id: str
     user_id: str
     user_name: str
+class GroupUpdate(BaseModel):
+    name: str
 
 @app.get("/")
 async def read_index():
@@ -376,14 +378,18 @@ def handle_message(event):
 
 @app.post("/api/groups/line_bind")
 async def bind_line_group(data: LineGroupBind):
-    group_name = f"LINE_{data.line_group_id}"
-    is_new_join = False  # 新增這行來判斷是否為新加入
+    is_new_join = False
     try:
-        res = supabase.table('groups').select('id').eq('name', group_name).execute()
+        # 💡 核心修正：改用 line_group_id 來尋找，這樣名字怎麼改都不會找不到！
+        res = supabase.table('groups').select('id').eq('line_group_id', data.line_group_id).execute()
         if res.data:
             group_id = res.data[0]['id']
         else:
-            ins = supabase.table('groups').insert({'name': group_name}).execute()
+            # 沒找到，建立一個全新的，並存入隱藏的 line_group_id
+            ins = supabase.table('groups').insert({
+                'name': '💬 聊天室專屬群組',
+                'line_group_id': data.line_group_id
+            }).execute()
             group_id = ins.data[0]['id']
             
         mem_res = supabase.table('group_members').select('*').eq('group_id', group_id).eq('user_id', data.user_id).execute()
@@ -392,10 +398,37 @@ async def bind_line_group(data: LineGroupBind):
                 'group_id': group_id, 'user_id': data.user_id, 'user_name': data.user_name
             }).execute()
             log_activity(group_id, data.user_name, 'join', '透過 LINE 聊天室自動加入')
-            is_new_join = True  # 如果剛寫入資料庫，標記為 True
+            is_new_join = True
             
-        # 回傳資料加入 is_new_join
         return {"status": "success", "group_id": group_id, "is_new_join": is_new_join}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ================= 新增：修改與刪除 API =================
+
+@app.put("/api/groups/{group_id}")
+async def update_group(group_id: int, data: GroupUpdate):
+    try:
+        supabase.table('groups').update({'name': data.name}).eq('id', group_id).execute()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/groups/{group_id}")
+async def delete_group(group_id: int):
+    try:
+        # 依序刪除相關資料，避免 Foreign Key 衝突報錯
+        supabase.table('activities').delete().eq('group_id', group_id).execute()
+        exp_res = supabase.table('expenses').select('id').eq('group_id', group_id).execute()
+        exp_ids = [e['id'] for e in exp_res.data]
+        if exp_ids:
+            supabase.table('expense_splits').delete().in_('expense_id', exp_ids).execute()
+        supabase.table('expenses').delete().eq('group_id', group_id).execute()
+        supabase.table('group_members').delete().eq('group_id', group_id).execute()
+        
+        # 最後刪除群組本身
+        supabase.table('groups').delete().eq('id', group_id).execute()
+        return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
