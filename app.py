@@ -380,18 +380,36 @@ def handle_message(event):
 async def bind_line_group(data: LineGroupBind):
     is_new_join = False
     try:
-        # 💡 核心修正：改用 line_group_id 來尋找，這樣名字怎麼改都不會找不到！
+        # 1. 正常尋找：看有沒有已經成功綁定 ID 的群組
         res = supabase.table('groups').select('id').eq('line_group_id', data.line_group_id).execute()
+        
         if res.data:
             group_id = res.data[0]['id']
         else:
-            # 沒找到，建立一個全新的，並存入隱藏的 line_group_id
-            ins = supabase.table('groups').insert({
-                'name': '💬 聊天室專屬群組',
-                'line_group_id': data.line_group_id
-            }).execute()
-            group_id = ins.data[0]['id']
+            # 2. 【終極防呆機制】：如果沒找到 ID，先檢查該用戶名下有沒有叫「💬 聊天室專屬群組」的群組
+            mem_res = supabase.table('group_members').select('group_id').eq('user_id', data.user_id).execute()
+            g_ids = [m['group_id'] for m in mem_res.data]
             
+            found_existing = False
+            if g_ids:
+                existing_groups = supabase.table('groups').select('id, name, line_group_id').in_('id', g_ids).execute()
+                for g in existing_groups.data:
+                    if g['name'] == '💬 聊天室專屬群組':
+                        # 找到了！把它當作這個聊天室的群組，並強制幫它補上遺失的 ID
+                        group_id = g['id']
+                        supabase.table('groups').update({'line_group_id': data.line_group_id}).eq('id', group_id).execute()
+                        found_existing = True
+                        break
+            
+            # 3. 真的完全找不到，才允許建立全新的
+            if not found_existing:
+                ins = supabase.table('groups').insert({
+                    'name': '💬 聊天室專屬群組',
+                    'line_group_id': data.line_group_id
+                }).execute()
+                group_id = ins.data[0]['id']
+                
+        # 4. 檢查成員是否已在群組內
         mem_res = supabase.table('group_members').select('*').eq('group_id', group_id).eq('user_id', data.user_id).execute()
         if not mem_res.data:
             supabase.table('group_members').insert({
@@ -402,6 +420,7 @@ async def bind_line_group(data: LineGroupBind):
             
         return {"status": "success", "group_id": group_id, "is_new_join": is_new_join}
     except Exception as e:
+        print("綁定群組發生錯誤:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 # ================= 新增：修改與刪除 API =================
