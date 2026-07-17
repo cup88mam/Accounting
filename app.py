@@ -179,25 +179,108 @@ async def callback(request: Request, x_line_signature: str = Header(None)):
         raise HTTPException(status_code=400, detail="Invalid signature")
     return {"status": "ok"}
 
+# === 功能一：剛加入聊天室/群組時，自動提供使用提示（升級為按鈕卡片版） ===
 @handler.add(JoinEvent)
 def handle_join(event):
-    welcome_msg = (
-        "大家好！我是【算帳工讀生】！\n"
-        "很高興能加入這個群組幫大家輕鬆分帳 ✨\n\n"
-        "💡 快速使用提示：\n"
-        "在群組聊天室中隨時輸入「記帳」或「選單」，我會立刻回傳功能目錄卡片！大家就能直接點選使用囉！"
+    flex_welcome = FlexSendMessage(
+        alt_text="👊🏿 討債工讀生來囉！🤜🏿",
+        contents={
+            "type": "bubble",
+            "size": "kilo",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "歡迎使用討債工讀生！🤜🏿",
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#fbc02d"
+                    },
+                    {
+                        "type": "text",
+                        "text": "大家好！我是討債工讀生🤜🏿，很高興能加入這個群組幫大家輕鬆分帳 ✨\n\n💡 快速使用提示：\n請直接點擊下方按鈕，我會立刻為大家送出功能目錄選單卡片喔！",
+                        "size": "sm",
+                        "color": "#ffffff",
+                        "margin": "md",
+                        "wrap": True  # 允許文字自動換行
+                    }
+                ],
+                "backgroundColor": "#1e1e1e"
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "height": "sm",
+                        "color": "#fbc02d",
+                        "action": {
+                            "type": "message",        # 類型設定為 message
+                            "label": "✨ 點我呼叫功能選單", # 按鈕文字
+                            "text": "選單"             # 點擊後自動發送的字串
+                        }
+                    }
+                ],
+                "backgroundColor": "#1e1e1e"
+            }
+        }
     )
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_msg))
+    line_bot_api.reply_message(event.reply_token, flex_welcome)
 
 @handler.add(FollowEvent)
 def handle_follow(event):
-    welcome_msg = (
-        "大家好！我是【算帳工讀生】！\n"
-        "感謝你將我加入好友 ✨\n\n"
-        "💡 快速使用提示：\n"
-        "隨時輸入「記帳」或「選單」即可呼叫我的功能目錄。把你跟朋友常用的 LINE 群組拉我進去，大家就能一起開啟雲端多人分帳囉！"
+    flex_welcome = FlexSendMessage(
+        alt_text="👊🏿 討債工讀生來囉！🤜🏿",
+        contents={
+            "type": "bubble",
+            "size": "kilo",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "👊🏿 嗨！我是討債工讀生！🤜🏿",
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#fbc02d"
+                    },
+                    {
+                        "type": "text",
+                        "text": "感謝你將我加入好友 ✨\n\n💡 快速使用提示：\n把你跟朋友常用的 LINE 群組拉我進去，大家就能一起記帳！現在可以點擊下方按鈕測試呼叫選單功能：",
+                        "size": "sm",
+                        "color": "#ffffff",
+                        "margin": "md",
+                        "wrap": True
+                    }
+                ],
+                "backgroundColor": "#1e1e1e"
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "height": "sm",
+                        "color": "#fbc02d",
+                        "action": {
+                            "type": "message",
+                            "label": "✨ 點我呼叫功能選單",
+                            "text": "選單"
+                        }
+                    }
+                ],
+                "backgroundColor": "#1e1e1e"
+            }
+        }
     )
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_msg))
+    line_bot_api.reply_message(event.reply_token, flex_welcome)
 
 
 # === 功能二：回傳含有 [首頁/紀錄/新增支出/分析] 4 個按鈕的選單 ===
