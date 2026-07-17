@@ -374,32 +374,31 @@ def handle_message(event):
         )
         line_bot_api.reply_message(event.reply_token, flex_message)
 
-@app.post("/api/groups")
+@app.post("/api/groups/line_bind")
 async def bind_line_group(data: LineGroupBind):
-    # 使用 LINE 的群組 ID 產生一個獨一無二的內部名稱
     group_name = f"LINE_{data.line_group_id}"
+    is_new_join = False  # 新增這行來判斷是否為新加入
     try:
-        # 尋找是否已經有這個聊天室專屬的記帳群組
         res = supabase.table('groups').select('id').eq('name', group_name).execute()
         if res.data:
             group_id = res.data[0]['id']
         else:
-            # 如果沒有，就自動建立一個
             ins = supabase.table('groups').insert({'name': group_name}).execute()
             group_id = ins.data[0]['id']
             
-        # 檢查該點擊的用戶是否已經在群組內
         mem_res = supabase.table('group_members').select('*').eq('group_id', group_id).eq('user_id', data.user_id).execute()
         if not mem_res.data:
-            # 不在裡面就自動加進去
             supabase.table('group_members').insert({
                 'group_id': group_id, 'user_id': data.user_id, 'user_name': data.user_name
             }).execute()
             log_activity(group_id, data.user_name, 'join', '透過 LINE 聊天室自動加入')
+            is_new_join = True  # 如果剛寫入資料庫，標記為 True
             
-        return {"status": "success", "group_id": group_id}
+        # 回傳資料加入 is_new_join
+        return {"status": "success", "group_id": group_id, "is_new_join": is_new_join}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 async def create_group(data: GroupCreate):
     try:
         res = supabase.table('groups').insert({'name': data.name}).execute()
