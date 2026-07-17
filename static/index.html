@@ -876,16 +876,28 @@
             try {
                 const response = await fetch('/api/scan-receipt', { method: 'POST', body: formData });
                 const result = await response.json();
-                if(result.currency) document.getElementById('currency').value = result.currency;
+                
                 if(result.amount) document.getElementById('amount').value = result.amount;
                 if(result.description) document.getElementById('description').value = result.description;
                 if(result.category) document.getElementById('category').value = result.category;
                 if(result.notes) document.getElementById('notes').value = result.notes;
                 
-                // 👇 請加入這三行來處理日期自動填入 👇
+                // --- 幣別防呆處理 ---
+                if(result.currency) {
+                    let cur = result.currency.toUpperCase();
+                    if(cur.includes('NT') || cur.includes('TW') || cur.includes('台')) cur = 'TWD';
+                    else if(cur.includes('JP') || cur.includes('日')) cur = 'JPY';
+                    else if(cur.includes('US') || cur.includes('美')) cur = 'USD';
+                    else cur = 'TWD'; // 預設為台幣
+                    document.getElementById('currency').value = cur;
+                }
+                
+                // --- 日期防呆處理 ---
                 if(result.date) { 
-                    document.getElementById('expense_date').value = result.date;
-                    updateExpenseDateDisplay(); // 確保畫面上的文字同步更新
+                    // 將可能出現的斜線 (2026/07/17) 強制轉換為橫槓 (2026-07-17)
+                    let formattedDate = result.date.replace(/\//g, '-');
+                    document.getElementById('expense_date').value = formattedDate;
+                    updateExpenseDateDisplay(); 
                 }
                 
                 updateRate(true);
