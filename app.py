@@ -11,7 +11,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, FlexSendMessage
+from linebot.models import MessageEvent, TextMessage, FlexSendMessage, JoinEvent, FollowEvent, TextSendMessage
 from main_mistral import process_receipt
 from database import get_supabase_client, init_db
 
@@ -174,14 +174,38 @@ async def callback(request: Request, x_line_signature: str = Header(None)):
         raise HTTPException(status_code=400, detail="Invalid signature")
     return {"status": "ok"}
 
+@handler.add(JoinEvent)
+def handle_join(event):
+    welcome_msg = (
+        "大家好！我是【算帳工讀生】！\n"
+        "很高興能加入這個群組幫大家輕鬆分帳 ✨\n\n"
+        "💡 快速使用提示：\n"
+        "在群組聊天室中隨時輸入「記帳」或「選單」，我會立刻回傳功能目錄卡片！大家就能直接點選使用囉！"
+    )
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_msg))
+
+@handler.add(FollowEvent)
+def handle_follow(event):
+    welcome_msg = (
+        "大家好！我是【算帳工讀生】！\n"
+        "感謝你將我加入好友 ✨\n\n"
+        "💡 快速使用提示：\n"
+        "隨時輸入「記帳」或「選單」即可呼叫我的功能目錄。把你跟朋友常用的 LINE 群組拉我進去，大家就能一起開啟雲端多人分帳囉！"
+    )
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_msg))
+
+
+# === 功能二：回傳含有 [首頁/紀錄/新增支出/分析] 4 個按鈕的選單 ===
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text
     
-    # 只要有人在群組輸入「記帳」或「選單」，機器人就會彈出這個介面
     if msg == "記帳" or msg == "選單":
+        # 定義你的基礎 LIFF 網址
+        base_liff_url = "https://liff.line.me/2010733190-GepcYGbG"
+        
         flex_message = FlexSendMessage(
-            alt_text="記帳選單來囉！",
+            alt_text="功能選單目錄來囉！",
             contents={
                 "type": "bubble",
                 "size": "kilo",
@@ -191,17 +215,17 @@ def handle_message(event):
                     "contents": [
                         {
                             "type": "text",
-                            "text": "專業分帳助理",
+                            "text": "算帳工讀生選單",
                             "weight": "bold",
-                            "size": "xl",
+                            "size": "lg",
                             "color": "#fbc02d"
                         },
                         {
                             "type": "text",
-                            "text": "請選擇你要執行的動作：",
-                            "size": "sm",
+                            "text": "請選擇欲前往的記帳頁面：",
+                            "size": "xs",
                             "color": "#aaaaaa",
-                            "margin": "sm"
+                            "margin": "xs"
                         }
                     ],
                     "backgroundColor": "#1e1e1e"
@@ -215,12 +239,45 @@ def handle_message(event):
                             "type": "button",
                             "style": "primary",
                             "height": "sm",
+                            "color": "#fbc02d",
                             "action": {
                                 "type": "uri",
-                                "label": "💰 開啟記帳 / 群組總覽",
-                                "uri": "https://liff.line.me/2010733190-GepcYGbG"
-                            },
-                            "color": "#fbc02d"
+                                "label": "🏠 前往首頁 (群組總覽)",
+                                "uri": f"{base_liff_url}?view=dashboard"
+                            }
+                        },
+                        {
+                            "type": "button",
+                            "style": "primary",
+                            "height": "sm",
+                            "color": "#444444",
+                            "action": {
+                                "type": "uri",
+                                "label": "📃 查看所有紀錄",
+                                "uri": f"{base_liff_url}?view=records"
+                            }
+                        },
+                        {
+                            "type": "button",
+                            "style": "primary",
+                            "height": "sm",
+                            "color": "#fbc02d",
+                            "action": {
+                                "type": "uri",
+                                "label": "➕ 新增支出 (AI 辨識)",
+                                "uri": f"{base_liff_url}?view=form"
+                            }
+                        },
+                        {
+                            "type": "button",
+                            "style": "primary",
+                            "height": "sm",
+                            "color": "#444444",
+                            "action": {
+                                "type": "uri",
+                                "label": "📊 消費數據分析",
+                                "uri": f"{base_liff_url}?view=analytics"
+                            }
                         }
                     ],
                     "backgroundColor": "#1e1e1e"

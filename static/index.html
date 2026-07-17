@@ -385,7 +385,17 @@
                 const urlParams = new URLSearchParams(window.location.search);
                 if(urlParams.get('invite_group')) await joinGroupViaInvite(urlParams.get('invite_group'));
 
+                // 載入群組資料（此函數預設會在最後呼叫 loadDashboardView()）
                 await loadGroups();
+                
+                // 👉 核心修改：在群組載入完畢後，根據網址參數進行分頁智慧路由
+                const targetView = urlParams.get('view');
+                if (targetView) {
+                    if (targetView === 'records') loadRecordsView();
+                    else if (targetView === 'form') openAddForm();
+                    else if (targetView === 'analytics') openAnalyticsPage();
+                    // 如果是 dashboard 則保持不變，因為 loadGroups 已經預設開啟首頁了
+                }
             } catch (err) { console.error("LIFF Error:", err); }
         };
 
