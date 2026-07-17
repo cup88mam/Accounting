@@ -881,6 +881,13 @@
                 if(result.description) document.getElementById('description').value = result.description;
                 if(result.category) document.getElementById('category').value = result.category;
                 if(result.notes) document.getElementById('notes').value = result.notes;
+                
+                // 👇 請加入這三行來處理日期自動填入 👇
+                if(result.date) { 
+                    document.getElementById('expense_date').value = result.date;
+                    updateExpenseDateDisplay(); // 確保畫面上的文字同步更新
+                }
+                
                 updateRate(true);
                 alert("自動填入完成！");
             } catch (e) { alert("辨識發生錯誤"); }
