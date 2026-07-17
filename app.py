@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
-
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, FlexSendMessage
 from main_mistral import process_receipt
 from database import get_supabase_client, init_db
 
@@ -17,6 +19,8 @@ load_dotenv()
 app = FastAPI()
 init_db()
 supabase = get_supabase_client()
+line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
+handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
 # 為了確保在沒有上傳圖片時不報錯，保留 static 路徑設定
 os.makedirs("static/uploads", exist_ok=True)
@@ -163,7 +167,67 @@ async def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1)
 
 @app.post("/callback")
 async def callback(request: Request, x_line_signature: str = Header(None)):
+    body = await request.body()
+    try:
+        handler.handle(body.decode("utf-8"), x_line_signature)
+    except InvalidSignatureError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
     return {"status": "ok"}
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    msg = event.message.text
+    
+    # 只要有人在群組輸入「記帳」或「選單」，機器人就會彈出這個介面
+    if msg == "記帳" or msg == "選單":
+        flex_message = FlexSendMessage(
+            alt_text="記帳選單來囉！",
+            contents={
+                "type": "bubble",
+                "size": "kilo",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "專業分帳助理",
+                            "weight": "bold",
+                            "size": "xl",
+                            "color": "#fbc02d"
+                        },
+                        {
+                            "type": "text",
+                            "text": "請選擇你要執行的動作：",
+                            "size": "sm",
+                            "color": "#aaaaaa",
+                            "margin": "sm"
+                        }
+                    ],
+                    "backgroundColor": "#1e1e1e"
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "sm",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "style": "primary",
+                            "height": "sm",
+                            "action": {
+                                "type": "uri",
+                                "label": "💰 開啟記帳 / 群組總覽",
+                                "uri": "https://liff.line.me/2010733190-GepcYGbG"
+                            },
+                            "color": "#fbc02d"
+                        }
+                    ],
+                    "backgroundColor": "#1e1e1e"
+                }
+            }
+        )
+        line_bot_api.reply_message(event.reply_token, flex_message)
 
 @app.post("/api/groups")
 async def create_group(data: GroupCreate):
