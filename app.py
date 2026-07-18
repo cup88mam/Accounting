@@ -1,3 +1,5 @@
+import re
+from datetime import datetime
 import os
 import time
 import base64
@@ -182,6 +184,7 @@ async def callback(request: Request, x_line_signature: str = Header(None)):
     return {"status": "ok"}
 
 # === 功能一：剛加入聊天室/群組時，自動提供使用提示（升級為按鈕卡片版） ===
+# === 功能一：剛加入聊天室/群組時，自動提供使用提示（雙按鈕升級版） ===
 @handler.add(JoinEvent)
 def handle_join(event):
     flex_welcome = FlexSendMessage(
@@ -202,11 +205,11 @@ def handle_join(event):
                     },
                     {
                         "type": "text",
-                        "text": "大家好！我是討債工讀生🤜🏿，很高興能加入這個群組幫大家輕鬆討債 💰\n\n🔫 快速使用提示：\n請直接點擊下方按鈕，我會立刻為大家送出討債目錄選單卡片喔！",
+                        "text": "大家好！我是討債工讀生🤜🏿，很高興能加入這個群組幫大家輕鬆討債 💰\n\n🔫 快速使用提示：\n請直接點擊下方按鈕，我會立刻為大家送出討債目錄選單，或是教你怎麼用文字快速記帳！",
                         "size": "sm",
                         "color": "#ffffff",
                         "margin": "md",
-                        "wrap": True  # 允許文字自動換行
+                        "wrap": True
                     }
                 ],
                 "backgroundColor": "#1e1e1e"
@@ -214,17 +217,21 @@ def handle_join(event):
             "footer": {
                 "type": "box",
                 "layout": "vertical",
+                "spacing": "sm",
                 "contents": [
                     {
                         "type": "button",
                         "style": "primary",
                         "height": "sm",
                         "color": "#fbc02d",
-                        "action": {
-                            "type": "message",        # 類型設定為 message
-                            "label": "🔫 點我呼叫討債選單", # 按鈕文字
-                            "text": "選單"             # 點擊後自動發送的字串
-                        }
+                        "action": { "type": "message", "label": "🔫 點我呼叫討債選單", "text": "選單" }
+                    },
+                    {
+                        "type": "button",
+                        "style": "secondary",
+                        "height": "sm",
+                        "color": "#444444",
+                        "action": { "type": "message", "label": "📖 快速指令教學", "text": "教學" }
                     }
                 ],
                 "backgroundColor": "#1e1e1e"
@@ -253,7 +260,7 @@ def handle_follow(event):
                     },
                     {
                         "type": "text",
-                        "text": "感謝你將我加入好友 ✨\n\n💡 快速使用提示：\n把你跟朋友常用的 LINE 群組拉我進去，大家就能一起記帳！現在可以點擊下方按鈕測試呼叫選單功能：",
+                        "text": "感謝你將我加入好友 ✨\n\n💡 快速使用提示：\n把你跟朋友常用的 LINE 群組拉我進去，大家就能一起記帳！現在可以點擊下方按鈕測試功能：",
                         "size": "sm",
                         "color": "#ffffff",
                         "margin": "md",
@@ -265,17 +272,21 @@ def handle_follow(event):
             "footer": {
                 "type": "box",
                 "layout": "vertical",
+                "spacing": "sm",
                 "contents": [
                     {
                         "type": "button",
                         "style": "primary",
                         "height": "sm",
                         "color": "#fbc02d",
-                        "action": {
-                            "type": "message",
-                            "label": "✨ 點我呼叫功能選單",
-                            "text": "選單"
-                        }
+                        "action": { "type": "message", "label": "🔫 點我呼叫討債選單", "text": "選單" }
+                    },
+                    {
+                        "type": "button",
+                        "style": "secondary",
+                        "height": "sm",
+                        "color": "#444444",
+                        "action": { "type": "message", "label": "📖 快速指令教學", "text": "教學" }
                     }
                 ],
                 "backgroundColor": "#1e1e1e"
@@ -285,44 +296,64 @@ def handle_follow(event):
     line_bot_api.reply_message(event.reply_token, flex_welcome)
 
 
-# === 功能二：回傳含有 [首頁/紀錄/新增支出/分析] 4 個按鈕的選單 ===
+# === 核心：處理群組訊息 (選單、教學、文字記帳) ===
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    msg = event.message.text
+    msg = event.message.text.strip()
     
-    if msg == "記帳" or msg == "選單":
-        base_liff_url = "https://liff.line.me/2010733190-GepcYGbG"
-        invite_param = ""
-        
-        # --- 🤖 機器人智慧判斷：這是在群組還是個人聊天？ ---
-        line_id = None
-        if event.source.type == "group":
-            line_id = event.source.group_id
-        elif event.source.type == "room":
-            line_id = event.source.room_id
-            
-        if line_id:
-            # 機器人直接在資料庫尋找或建立該聊天室對應的記帳群組
-            res = supabase.table('groups').select('id').eq('line_group_id', line_id).execute()
-            if res.data:
-                db_group_id = res.data[0]['id']
-            else:
-                ins = supabase.table('groups').insert({
-                    'name': '💬 聊天室專屬群組',
-                    'line_group_id': line_id
-                }).execute()
-                db_group_id = ins.data[0]['id']
-            
-            # 將資料庫真實的 group_id 變成邀請碼參數
-            invite_param = f"&invite_group={db_group_id}"
+    # --- 1. 處理教學選單 ---
+    if msg in ["教學", "指令", "快速指令"]:
+        tutorial_flex = FlexSendMessage(
+            alt_text="快速記帳指令教學",
+            contents={
+                "type": "bubble",
+                "size": "mega",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        { "type": "text", "text": "🔫 討債快速指令教學", "weight": "bold", "size": "xl", "color": "#fbc02d" },
+                        { "type": "separator", "margin": "md" },
+                        { "type": "text", "text": "【新增單人欠款 / 還款】", "weight": "bold", "color": "#ffffff", "margin": "md" },
+                        { "type": "text", "text": "@小龍 欠我 車費 200\n我欠 @小龍 車費 200\n@小龍 @小恩 各欠我 車費 200\n@小龍 欠 @小恩 早餐 300\n\n@小龍 還我 200\n我還 @小龍 200", "size": "sm", "color": "#aaaaaa", "wrap": True },
+                        { "type": "separator", "margin": "md" },
+                        { "type": "text", "text": "【新增平分帳款】(全群平分)", "weight": "bold", "color": "#ffffff", "margin": "md" },
+                        { "type": "text", "text": "自己付 👉 帳款名 金額\n(例：午餐 300)\n\n他人付 👉 @名字 帳款名 金額\n(例：@小明 午餐 300)", "size": "sm", "color": "#aaaaaa", "wrap": True }
+                    ],
+                    "backgroundColor": "#1e1e1e"
+                }
+            }
+        )
+        line_bot_api.reply_message(event.reply_token, tutorial_flex)
+        return
 
-        # --- 製作包含邀請碼與分頁指示的專屬網址 ---
+    # --- 2. 獲取 LINE 聊天室 ID 並建立/尋找資料庫群組 ---
+    line_id = None
+    if event.source.type == "group":
+        line_id = event.source.group_id
+    elif event.source.type == "room":
+        line_id = event.source.room_id
+        
+    db_group_id = None
+    if line_id:
+        res = supabase.table('groups').select('id').eq('line_group_id', line_id).execute()
+        if res.data:
+            db_group_id = res.data[0]['id']
+        else:
+            ins = supabase.table('groups').insert({'name': '💬 聊天室專屬群組', 'line_group_id': line_id}).execute()
+            db_group_id = ins.data[0]['id']
+
+    # --- 3. 處理主選單呼叫 ---
+    if msg in ["記帳", "選單"]:
+        base_liff_url = "https://liff.line.me/2010733190-GepcYGbG"
+        invite_param = f"&invite_group={db_group_id}" if db_group_id else ""
+        
         url_dash = f"{base_liff_url}?view=dashboard{invite_param}"
         url_rec = f"{base_liff_url}?view=records{invite_param}"
         url_form = f"{base_liff_url}?view=form{invite_param}"
         url_ana = f"{base_liff_url}?view=analytics{invite_param}"
 
-        flex_message = FlexSendMessage(
+        flex_menu = FlexSendMessage(
             alt_text="功能選單目錄來囉！",
             contents={
                 "type": "bubble",
@@ -331,20 +362,8 @@ def handle_message(event):
                     "type": "box",
                     "layout": "vertical",
                     "contents": [
-                        {
-                            "type": "text",
-                            "text": "👊🏿 討債工讀生選單 🤜🏿",
-                            "weight": "bold",
-                            "size": "lg",
-                            "color": "#fbc02d"
-                        },
-                        {
-                            "type": "text",
-                            "text": "請選擇欲前往的討債頁面：",
-                            "size": "xs",
-                            "color": "#aaaaaa",
-                            "margin": "xs"
-                        }
+                        { "type": "text", "text": "👊🏿 討債工讀生選單 🤜🏿", "weight": "bold", "size": "lg", "color": "#fbc02d" },
+                        { "type": "text", "text": "請選擇欲前往的討債頁面：", "size": "xs", "color": "#aaaaaa", "margin": "xs" }
                     ],
                     "backgroundColor": "#1e1e1e"
                 },
@@ -353,40 +372,108 @@ def handle_message(event):
                     "layout": "vertical",
                     "spacing": "sm",
                     "contents": [
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "height": "sm",
-                            "color": "#fbc02d",
-                            "action": { "type": "uri", "label": "🏠 前往首頁 (群組總覽)", "uri": url_dash }
-                        },
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "height": "sm",
-                            "color": "#444444",
-                            "action": { "type": "uri", "label": "📃 查看所有紀錄", "uri": url_rec }
-                        },
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "height": "sm",
-                            "color": "#fbc02d",
-                            "action": { "type": "uri", "label": "➕ 新增支出 (AI 辨識)", "uri": url_form }
-                        },
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "height": "sm",
-                            "color": "#444444",
-                            "action": { "type": "uri", "label": "📊 消費數據分析", "uri": url_ana }
-                        }
+                        { "type": "button", "style": "primary", "height": "sm", "color": "#fbc02d", "action": { "type": "uri", "label": "🏠 前往首頁 (群組總覽)", "uri": url_dash } },
+                        { "type": "button", "style": "primary", "height": "sm", "color": "#444444", "action": { "type": "uri", "label": "📃 查看所有紀錄", "uri": url_rec } },
+                        { "type": "button", "style": "primary", "height": "sm", "color": "#fbc02d", "action": { "type": "uri", "label": "➕ 新增支出 (AI 辨識)", "uri": url_form } },
+                        { "type": "button", "style": "primary", "height": "sm", "color": "#444444", "action": { "type": "uri", "label": "📊 消費數據分析", "uri": url_ana } }
                     ],
                     "backgroundColor": "#1e1e1e"
                 }
             }
         )
-        line_bot_api.reply_message(event.reply_token, flex_message)
+        line_bot_api.reply_message(event.reply_token, flex_menu)
+        return
+
+    # --- 4. 處理自動文字記帳 (必須在群組內) ---
+    if not db_group_id:
+        return
+
+    # 嘗試抓取發言者名稱 (如果沒加好友抓不到就顯示'某人')
+    sender_id = event.source.user_id
+    sender_name = "某人"
+    try:
+        if event.source.type == "group":
+            sender_name = line_bot_api.get_group_member_profile(line_id, sender_id).display_name
+        elif event.source.type == "room":
+            sender_name = line_bot_api.get_room_member_profile(line_id, sender_id).display_name
+        else:
+            sender_name = line_bot_api.get_profile(sender_id).display_name
+    except:
+        pass
+
+    # 確保發送者在記帳群組成員名單內
+    mem_res = supabase.table('group_members').select('*').eq('group_id', db_group_id).eq('user_id', sender_id).execute()
+    if not mem_res.data:
+        supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': sender_id, 'user_name': sender_name}).execute()
+
+    # 輔助函數：解析 @名字 轉換為 user_id
+    def resolve_member(name):
+        name = name.replace("@", "")
+        res = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).eq('user_name', name).execute()
+        if res.data:
+            return res.data[0]['user_id']
+        # 找不到的話自動建立虛擬成員
+        vid = f"virtual_{int(time.time()*1000)}_{name}"
+        supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': vid, 'user_name': name}).execute()
+        return vid
+
+    # 正則表達式偵測指令
+    m_repay_1 = re.match(r'^@(\S+)\s+還我\s+([0-9.]+)$', msg)
+    m_repay_2 = re.match(r'^我還\s+@(\S+)\s+([0-9.]+)$', msg)
+    m_debt_1 = re.match(r'^@(\S+)\s+欠我\s+(\S+)\s+([0-9.]+)$', msg)
+    m_debt_2 = re.match(r'^我欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)$', msg)
+    m_debt_3 = re.match(r'^@(\S+)\s+@(\S+)\s+各欠我\s+(\S+)\s+([0-9.]+)$', msg)
+    m_debt_4 = re.match(r'^@(\S+)\s+欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)$', msg)
+    m_split_1 = re.match(r'^@(\S+)\s+(\S+)\s+([0-9.]+)$', msg)
+    m_split_2 = re.match(r'^(\S+)\s+([0-9.]+)$', msg)
+
+    payer_id, category, desc, amount, splits = None, "一般支出", "", 0.0, []
+
+    if m_repay_1:
+        payer_id, amount, desc, category = resolve_member(m_repay_1.group(1)), float(m_repay_1.group(2)), "轉帳還款", "轉帳"
+        splits = [{"user_id": sender_id, "owed_amount": amount}]
+    elif m_repay_2:
+        payer_id, receiver_id, amount, desc, category = sender_id, resolve_member(m_repay_2.group(1)), float(m_repay_2.group(2)), "轉帳還款", "轉帳"
+        splits = [{"user_id": receiver_id, "owed_amount": amount}]
+    elif m_debt_1:
+        debtor_id, desc, amount, payer_id = resolve_member(m_debt_1.group(1)), m_debt_1.group(2), float(m_debt_1.group(3)), sender_id
+        splits = [{"user_id": debtor_id, "owed_amount": amount}]
+    elif m_debt_2:
+        payer_id, desc, amount, debtor_id = resolve_member(m_debt_2.group(1)), m_debt_2.group(2), float(m_debt_2.group(3)), sender_id
+        splits = [{"user_id": debtor_id, "owed_amount": amount}]
+    elif m_debt_3:
+        d1_id, d2_id, desc, each_amount = resolve_member(m_debt_3.group(1)), resolve_member(m_debt_3.group(2)), m_debt_3.group(3), float(m_debt_3.group(4))
+        payer_id, amount = sender_id, each_amount * 2
+        splits = [{"user_id": d1_id, "owed_amount": each_amount}, {"user_id": d2_id, "owed_amount": each_amount}]
+    elif m_debt_4:
+        debtor_id, payer_id, desc, amount = resolve_member(m_debt_4.group(1)), resolve_member(m_debt_4.group(2)), m_debt_4.group(3), float(m_debt_4.group(4))
+        splits = [{"user_id": debtor_id, "owed_amount": amount}]
+    elif m_split_1:
+        payer_id, desc, amount = resolve_member(m_split_1.group(1)), m_split_1.group(2), float(m_split_1.group(3))
+        all_m = [m['user_id'] for m in supabase.table('group_members').select('user_id').eq('group_id', db_group_id).execute().data]
+        if not all_m: all_m = [payer_id]
+        splits = [{"user_id": m, "owed_amount": amount / len(all_m)} for m in all_m]
+    elif m_split_2:
+        desc, amount, payer_id = m_split_2.group(1), float(m_split_2.group(2)), sender_id
+        all_m = [m['user_id'] for m in supabase.table('group_members').select('user_id').eq('group_id', db_group_id).execute().data]
+        if not all_m: all_m = [payer_id]
+        splits = [{"user_id": m, "owed_amount": amount / len(all_m)} for m in all_m]
+
+    if payer_id and splits:
+        # 寫入 Supabase 資料庫
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        exp_res = supabase.table('expenses').insert({
+            'group_id': db_group_id, 'expense_date': today_str, 'category': category,
+            'description': desc, 'amount': amount, 'currency': 'TWD', 'exchange_rate': 1.0, 'payer_id': payer_id
+        }).execute()
+        
+        splits_data = [{"expense_id": exp_res.data[0]['id'], "user_id": s['user_id'], "owed_amount": s['owed_amount']} for s in splits]
+        supabase.table('expense_splits').insert(splits_data).execute()
+        log_activity(db_group_id, sender_name, 'add', desc, "文字指令快速記帳")
+
+        # 超派回覆
+        reply = f"🔫 討債工讀生已火速記錄！\n✅ 項目：{desc}\n💰 總額：{amount:g} 元\n趕快點擊選單去追債吧！🤜🏿"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 
 
