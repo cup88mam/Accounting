@@ -291,9 +291,37 @@ def handle_message(event):
     msg = event.message.text
     
     if msg == "記帳" or msg == "選單":
-        # 定義你的基礎 LIFF 網址
         base_liff_url = "https://liff.line.me/2010733190-GepcYGbG"
+        invite_param = ""
         
+        # --- 🤖 機器人智慧判斷：這是在群組還是個人聊天？ ---
+        line_id = None
+        if event.source.type == "group":
+            line_id = event.source.group_id
+        elif event.source.type == "room":
+            line_id = event.source.room_id
+            
+        if line_id:
+            # 機器人直接在資料庫尋找或建立該聊天室對應的記帳群組
+            res = supabase.table('groups').select('id').eq('line_group_id', line_id).execute()
+            if res.data:
+                db_group_id = res.data[0]['id']
+            else:
+                ins = supabase.table('groups').insert({
+                    'name': '💬 聊天室專屬群組',
+                    'line_group_id': line_id
+                }).execute()
+                db_group_id = ins.data[0]['id']
+            
+            # 將資料庫真實的 group_id 變成邀請碼參數
+            invite_param = f"&invite_group={db_group_id}"
+
+        # --- 製作包含邀請碼與分頁指示的專屬網址 ---
+        url_dash = f"{base_liff_url}?view=dashboard{invite_param}"
+        url_rec = f"{base_liff_url}?view=records{invite_param}"
+        url_form = f"{base_liff_url}?view=form{invite_param}"
+        url_ana = f"{base_liff_url}?view=analytics{invite_param}"
+
         flex_message = FlexSendMessage(
             alt_text="功能選單目錄來囉！",
             contents={
@@ -305,7 +333,7 @@ def handle_message(event):
                     "contents": [
                         {
                             "type": "text",
-                            "text": "👊🏿討債工讀生選單👊🏿",
+                            "text": "🦖 分帳龍寶寶選單",
                             "weight": "bold",
                             "size": "lg",
                             "color": "#fbc02d"
@@ -330,44 +358,28 @@ def handle_message(event):
                             "style": "primary",
                             "height": "sm",
                             "color": "#fbc02d",
-                            "action": {
-                                "type": "uri",
-                                "label": "🏠 前往首頁 (群組總覽)",
-                                "uri": f"{base_liff_url}?view=dashboard"
-                            }
+                            "action": { "type": "uri", "label": "🏠 前往首頁 (群組總覽)", "uri": url_dash }
                         },
                         {
                             "type": "button",
                             "style": "primary",
                             "height": "sm",
                             "color": "#444444",
-                            "action": {
-                                "type": "uri",
-                                "label": "📃 查看所有紀錄",
-                                "uri": f"{base_liff_url}?view=records"
-                            }
+                            "action": { "type": "uri", "label": "📃 查看所有紀錄", "uri": url_rec }
                         },
                         {
                             "type": "button",
                             "style": "primary",
                             "height": "sm",
                             "color": "#fbc02d",
-                            "action": {
-                                "type": "uri",
-                                "label": "➕ 新增支出 (AI 辨識)",
-                                "uri": f"{base_liff_url}?view=form"
-                            }
+                            "action": { "type": "uri", "label": "➕ 新增支出 (AI 辨識)", "uri": url_form }
                         },
                         {
                             "type": "button",
                             "style": "primary",
                             "height": "sm",
                             "color": "#444444",
-                            "action": {
-                                "type": "uri",
-                                "label": "📊 消費數據分析",
-                                "uri": f"{base_liff_url}?view=analytics"
-                            }
+                            "action": { "type": "uri", "label": "📊 消費數據分析", "uri": url_ana }
                         }
                     ],
                     "backgroundColor": "#1e1e1e"
@@ -376,52 +388,7 @@ def handle_message(event):
         )
         line_bot_api.reply_message(event.reply_token, flex_message)
 
-@app.post("/api/groups/line_bind")
-async def bind_line_group(data: LineGroupBind):
-    is_new_join = False
-    try:
-        # 1. 正常尋找：看有沒有已經成功綁定 ID 的群組
-        res = supabase.table('groups').select('id').eq('line_group_id', data.line_group_id).execute()
-        
-        if res.data:
-            group_id = res.data[0]['id']
-        else:
-            # 2. 【終極防呆機制】：如果沒找到 ID，先檢查該用戶名下有沒有叫「💬 聊天室專屬群組」的群組
-            mem_res = supabase.table('group_members').select('group_id').eq('user_id', data.user_id).execute()
-            g_ids = [m['group_id'] for m in mem_res.data]
-            
-            found_existing = False
-            if g_ids:
-                existing_groups = supabase.table('groups').select('id, name, line_group_id').in_('id', g_ids).execute()
-                for g in existing_groups.data:
-                    if g['name'] == '💬 聊天室專屬群組':
-                        # 找到了！把它當作這個聊天室的群組，並強制幫它補上遺失的 ID
-                        group_id = g['id']
-                        supabase.table('groups').update({'line_group_id': data.line_group_id}).eq('id', group_id).execute()
-                        found_existing = True
-                        break
-            
-            # 3. 真的完全找不到，才允許建立全新的
-            if not found_existing:
-                ins = supabase.table('groups').insert({
-                    'name': '💬 聊天室專屬群組',
-                    'line_group_id': data.line_group_id
-                }).execute()
-                group_id = ins.data[0]['id']
-                
-        # 4. 檢查成員是否已在群組內
-        mem_res = supabase.table('group_members').select('*').eq('group_id', group_id).eq('user_id', data.user_id).execute()
-        if not mem_res.data:
-            supabase.table('group_members').insert({
-                'group_id': group_id, 'user_id': data.user_id, 'user_name': data.user_name
-            }).execute()
-            log_activity(group_id, data.user_name, 'join', '透過 LINE 聊天室自動加入')
-            is_new_join = True
-            
-        return {"status": "success", "group_id": group_id, "is_new_join": is_new_join}
-    except Exception as e:
-        print("綁定群組發生錯誤:", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ================= 新增：修改與刪除 API =================
 
@@ -481,7 +448,9 @@ async def add_member(group_id: int, member: MemberData):
                 "group_id": group_id, "user_id": member.user_id, "user_name": member.user_name
             }).execute()
             log_activity(group_id, member.user_name, 'join', '加入了群組')
-        return {"status": "success"}
+            # 👇 多回傳 is_new: True，讓前端知道要不要跳通知
+            return {"status": "success", "is_new": True}
+        return {"status": "success", "is_new": False}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

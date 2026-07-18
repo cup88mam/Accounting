@@ -384,28 +384,16 @@
                 currentUserName = profile.displayName;
                 
                 const urlParams = new URLSearchParams(window.location.search);
-                if(urlParams.get('invite_group')) await joinGroupViaInvite(urlParams.get('invite_group'));
-
-                // 👇 核心修改：判斷是否在 LINE 群組/聊天室內開啟
-                const context = liff.getContext();
-                const lineGroupId = context ? (context.groupId || context.roomId) : null;
                 
-                if (lineGroupId) {
-                    try {
-                        const res = await fetch('/api/groups/line_bind', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ line_group_id: lineGroupId, user_id: currentUserId, user_name: currentUserName })
-                        });
-                        const bindData = await res.json();
-                        activeGroupId = bindData.group_id; 
-                        
-                        // 👇 加入這段提示：只有第一次進入群組時會彈出歡迎視窗
-                        if (bindData.is_new_join) {
-                            alert("✅ 綁定成功！您已自動加入本聊天室的專屬記帳群組！");
-                        }
-                    } catch (e) {
-                        console.error("自動綁定失敗", e);
-                    }
+                // 👉 直接接收機器人傳來的邀請碼
+                let targetGroupId = null;
+                if(urlParams.get('invite_group')) {
+                    targetGroupId = await joinGroupViaInvite(urlParams.get('invite_group'));
+                }
+
+                // 如果有接收到邀請碼，強制將畫面切換到該群組
+                if (targetGroupId) {
+                    activeGroupId = targetGroupId;
                 }
 
                 await loadGroups();
@@ -715,11 +703,21 @@
         }
 
         async function joinGroupViaInvite(groupId) {
-            await fetch(`/api/groups/${groupId}/members`, {
+            const res = await fetch(`/api/groups/${groupId}/members`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: currentUserId, user_name: currentUserName })
             });
-            alert("成功加入群組！");
-            window.history.replaceState({}, document.title, window.location.pathname);
+            const data = await res.json();
+            
+            // 只有真的是第一次加入才跳通知
+            if (data.is_new) {
+                alert("✅ 已自動為您加入本聊天室的專屬群組！");
+            }
+            
+            // 保持網址乾淨，避免重新整理出問題
+            const currentView = new URLSearchParams(window.location.search).get('view') || 'dashboard';
+            window.history.replaceState({}, document.title, window.location.pathname + "?view=" + currentView);
+            
+            return parseInt(groupId);
         }
 
         async function createVirtualMember() {
