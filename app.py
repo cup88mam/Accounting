@@ -340,7 +340,7 @@ def handle_message(event):
                         },
                         {
                             "type": "text",
-                            "text": "請選擇欲前往的記帳頁面：",
+                            "text": "請選擇欲前往的討債頁面：",
                             "size": "xs",
                             "color": "#aaaaaa",
                             "margin": "xs"
