@@ -19,3 +19,7 @@ venv.bak/
 
 # 其他
 .DS_Store
+
+git add .
+git commit -m "update"
+git push

@@ -202,7 +202,7 @@ def handle_join(event):
                     },
                     {
                         "type": "text",
-                        "text": "大家好！我是討債工讀生🤜🏿，很高興能加入這個群組幫大家輕鬆分帳 ✨\n\n💡 快速使用提示：\n請直接點擊下方按鈕，我會立刻為大家送出功能目錄選單卡片喔！",
+                        "text": "大家好！我是討債工讀生🤜🏿，很高興能加入這個群組幫大家輕鬆討債 💰\n\n🔫 快速使用提示：\n請直接點擊下方按鈕，我會立刻為大家送出討債目錄選單卡片喔！",
                         "size": "sm",
                         "color": "#ffffff",
                         "margin": "md",
@@ -222,7 +222,7 @@ def handle_join(event):
                         "color": "#fbc02d",
                         "action": {
                             "type": "message",        # 類型設定為 message
-                            "label": "✨ 點我呼叫功能選單", # 按鈕文字
+                            "label": "🔫 點我呼叫討債選單", # 按鈕文字
                             "text": "選單"             # 點擊後自動發送的字串
                         }
                     }
@@ -333,7 +333,7 @@ def handle_message(event):
                     "contents": [
                         {
                             "type": "text",
-                            "text": "👊🏿 討債工讀選單 🤜🏿",
+                            "text": "👊🏿 討債工讀生選單 🤜🏿",
                             "weight": "bold",
                             "size": "lg",
                             "color": "#fbc02d"
