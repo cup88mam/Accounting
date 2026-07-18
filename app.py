@@ -333,7 +333,7 @@ def handle_message(event):
                     "contents": [
                         {
                             "type": "text",
-                            "text": "🦖 分帳龍寶寶選單",
+                            "text": "👊🏿 討債工讀選單 🤜🏿",
                             "weight": "bold",
                             "size": "lg",
                             "color": "#fbc02d"
