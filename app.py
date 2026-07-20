@@ -297,11 +297,12 @@ def handle_follow(event):
 
 
 # === 核心：處理群組訊息 (選單、教學、文字記帳) ===
+# === 核心：處理群組訊息 (選單、教學、文字記帳 + 多國幣別支援) ===
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text.strip()
     
-    # --- 1. 處理教學選單 ---
+    # --- 1. 處理教學選單 (加入多幣別說明) ---
     if msg in ["教學", "指令", "快速指令"]:
         tutorial_flex = FlexSendMessage(
             alt_text="快速記帳指令教學",
@@ -318,7 +319,10 @@ def handle_message(event):
                         { "type": "text", "text": "@小龍 欠我 車費 200\n我欠 @小龍 車費 200\n@小龍 @小恩 各欠我 車費 200\n@小龍 欠 @小恩 早餐 300\n\n@小龍 還我 200\n我還 @小龍 200", "size": "sm", "color": "#aaaaaa", "wrap": True },
                         { "type": "separator", "margin": "md" },
                         { "type": "text", "text": "【新增平分帳款】(全群平分)", "weight": "bold", "color": "#ffffff", "margin": "md" },
-                        { "type": "text", "text": "自己付 👉 帳款名 金額\n(例：午餐 300)\n\n他人付 👉 @名字 帳款名 金額\n(例：@小明 午餐 300)", "size": "sm", "color": "#aaaaaa", "wrap": True }
+                        { "type": "text", "text": "自己付 👉 帳款名 金額\n(例：午餐 300)\n\n他人付 👉 @名字 帳款名 金額\n(例：@小明 午餐 300)", "size": "sm", "color": "#aaaaaa", "wrap": True },
+                        { "type": "separator", "margin": "md" },
+                        { "type": "text", "text": "【支援多國幣別 (選填)】", "weight": "bold", "color": "#fbc02d", "margin": "md" },
+                        { "type": "text", "text": "在金額後方加上幣別 (預設為台幣)\n支援：USD, 美金, JPY, 日幣, ¥\n\n範例：@小龍 午餐 10 USD\n範例：@小恩 欠我 門票 1500 日圓", "size": "sm", "color": "#aaaaaa", "wrap": True }
                     ],
                     "backgroundColor": "#1e1e1e"
                 }
@@ -388,7 +392,6 @@ def handle_message(event):
     if not db_group_id:
         return
 
-    # 嘗試抓取發言者名稱 (如果沒加好友抓不到就顯示'某人')
     sender_id = event.source.user_id
     sender_name = "某人"
     try:
@@ -401,78 +404,92 @@ def handle_message(event):
     except:
         pass
 
-    # 確保發送者在記帳群組成員名單內
     mem_res = supabase.table('group_members').select('*').eq('group_id', db_group_id).eq('user_id', sender_id).execute()
     if not mem_res.data:
         supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': sender_id, 'user_name': sender_name}).execute()
 
-    # 輔助函數：解析 @名字 轉換為 user_id
     def resolve_member(name):
         name = name.replace("@", "")
         res = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).eq('user_name', name).execute()
-        if res.data:
-            return res.data[0]['user_id']
-        # 找不到的話自動建立虛擬成員
+        if res.data: return res.data[0]['user_id']
         vid = f"virtual_{int(time.time()*1000)}_{name}"
         supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': vid, 'user_name': name}).execute()
         return vid
 
-    # 正則表達式偵測指令
-    m_repay_1 = re.match(r'^@(\S+)\s+還我\s+([0-9.]+)$', msg)
-    m_repay_2 = re.match(r'^我還\s+@(\S+)\s+([0-9.]+)$', msg)
-    m_debt_1 = re.match(r'^@(\S+)\s+欠我\s+(\S+)\s+([0-9.]+)$', msg)
-    m_debt_2 = re.match(r'^我欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)$', msg)
-    m_debt_3 = re.match(r'^@(\S+)\s+@(\S+)\s+各欠我\s+(\S+)\s+([0-9.]+)$', msg)
-    m_debt_4 = re.match(r'^@(\S+)\s+欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)$', msg)
-    m_split_1 = re.match(r'^@(\S+)\s+(\S+)\s+([0-9.]+)$', msg)
-    m_split_2 = re.match(r'^(\S+)\s+([0-9.]+)$', msg)
+    # 幣別判斷小工具 (與前端網頁的匯率同步)
+    def normalize_currency(raw_text):
+        if not raw_text: return "TWD", 1.0
+        text = raw_text.upper()
+        if any(k in text for k in ['JPY', '日圓', '日幣', '￥', '¥']): return "JPY", 0.20
+        if any(k in text for k in ['USD', '美金', '美元', 'US']): return "USD", 32.5
+        return "TWD", 1.0
+
+    # 正則表達式偵測指令 (尾端加入可選的幣別捕獲群組)
+    m_repay_1 = re.match(r'^@(\S+)\s+還我\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_repay_2 = re.match(r'^我還\s+@(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_debt_1 = re.match(r'^@(\S+)\s+欠我\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_debt_2 = re.match(r'^我欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_debt_3 = re.match(r'^@(\S+)\s+@(\S+)\s+各欠我\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_debt_4 = re.match(r'^@(\S+)\s+欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_split_1 = re.match(r'^@(\S+)\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_split_2 = re.match(r'^(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
 
     payer_id, category, desc, amount, splits = None, "一般支出", "", 0.0, []
+    raw_currency = ""
 
     if m_repay_1:
         payer_id, amount, desc, category = resolve_member(m_repay_1.group(1)), float(m_repay_1.group(2)), "轉帳還款", "轉帳"
+        raw_currency = m_repay_1.group(3)
         splits = [{"user_id": sender_id, "owed_amount": amount}]
     elif m_repay_2:
         payer_id, receiver_id, amount, desc, category = sender_id, resolve_member(m_repay_2.group(1)), float(m_repay_2.group(2)), "轉帳還款", "轉帳"
+        raw_currency = m_repay_2.group(3)
         splits = [{"user_id": receiver_id, "owed_amount": amount}]
     elif m_debt_1:
         debtor_id, desc, amount, payer_id = resolve_member(m_debt_1.group(1)), m_debt_1.group(2), float(m_debt_1.group(3)), sender_id
+        raw_currency = m_debt_1.group(4)
         splits = [{"user_id": debtor_id, "owed_amount": amount}]
     elif m_debt_2:
         payer_id, desc, amount, debtor_id = resolve_member(m_debt_2.group(1)), m_debt_2.group(2), float(m_debt_2.group(3)), sender_id
+        raw_currency = m_debt_2.group(4)
         splits = [{"user_id": debtor_id, "owed_amount": amount}]
     elif m_debt_3:
         d1_id, d2_id, desc, each_amount = resolve_member(m_debt_3.group(1)), resolve_member(m_debt_3.group(2)), m_debt_3.group(3), float(m_debt_3.group(4))
         payer_id, amount = sender_id, each_amount * 2
+        raw_currency = m_debt_3.group(5)
         splits = [{"user_id": d1_id, "owed_amount": each_amount}, {"user_id": d2_id, "owed_amount": each_amount}]
     elif m_debt_4:
         debtor_id, payer_id, desc, amount = resolve_member(m_debt_4.group(1)), resolve_member(m_debt_4.group(2)), m_debt_4.group(3), float(m_debt_4.group(4))
+        raw_currency = m_debt_4.group(5)
         splits = [{"user_id": debtor_id, "owed_amount": amount}]
     elif m_split_1:
         payer_id, desc, amount = resolve_member(m_split_1.group(1)), m_split_1.group(2), float(m_split_1.group(3))
+        raw_currency = m_split_1.group(4)
         all_m = [m['user_id'] for m in supabase.table('group_members').select('user_id').eq('group_id', db_group_id).execute().data]
         if not all_m: all_m = [payer_id]
         splits = [{"user_id": m, "owed_amount": amount / len(all_m)} for m in all_m]
     elif m_split_2:
         desc, amount, payer_id = m_split_2.group(1), float(m_split_2.group(2)), sender_id
+        raw_currency = m_split_2.group(3)
         all_m = [m['user_id'] for m in supabase.table('group_members').select('user_id').eq('group_id', db_group_id).execute().data]
         if not all_m: all_m = [payer_id]
         splits = [{"user_id": m, "owed_amount": amount / len(all_m)} for m in all_m]
 
     if payer_id and splits:
-        # 寫入 Supabase 資料庫
+        currency, exchange_rate = normalize_currency(raw_currency)
+        
         today_str = datetime.now().strftime("%Y-%m-%d")
         exp_res = supabase.table('expenses').insert({
             'group_id': db_group_id, 'expense_date': today_str, 'category': category,
-            'description': desc, 'amount': amount, 'currency': 'TWD', 'exchange_rate': 1.0, 'payer_id': payer_id
+            'description': desc, 'amount': amount, 'currency': currency, 'exchange_rate': exchange_rate, 'payer_id': payer_id
         }).execute()
         
         splits_data = [{"expense_id": exp_res.data[0]['id'], "user_id": s['user_id'], "owed_amount": s['owed_amount']} for s in splits]
         supabase.table('expense_splits').insert(splits_data).execute()
-        log_activity(db_group_id, sender_name, 'add', desc, "文字指令快速記帳")
+        log_activity(db_group_id, sender_name, 'add', desc, f"快速記帳 ({currency})")
 
-        # 超派回覆
-        reply = f"🔫 討債工讀生已火速記錄！\n✅ 項目：{desc}\n💰 總額：{amount:g} 元\n趕快點擊選單去追債吧！🤜🏿"
+        # 超派回覆 (包含幣別提示)
+        reply = f"🔫 討債工讀生已火速記錄！\n✅ 項目：{desc}\n💰 總額：{amount:g} {currency}\n趕快點擊選單去追債吧！🤜🏿"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 
