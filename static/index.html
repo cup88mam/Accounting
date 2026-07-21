@@ -158,10 +158,16 @@
 
     <!-- ================= 視圖 3：全新消費分析 ================= -->
     <div id="view-analytics" class="view-section">
-        <div class="header">消費分析</div>
         <div class="form-tabs">
             <div class="form-tab active" id="tab-ana-group" onclick="loadAnalyticsData('group')">群組消費</div>
             <div class="form-tab" id="tab-ana-personal" onclick="loadAnalyticsData('personal')">個人消費</div>
+        </div>
+        
+        <!-- 👇 新增：成員切換選擇器 (預設隱藏) -->
+        <div id="ana-member-selector" style="display:none; padding: 0 20px 10px;">
+            <select id="ana-user-select" class="form-control" style="background-color: #2a2a2a; border-radius: 8px; padding: 8px; text-align: center; width: 100%; color: var(--primary-yellow); font-weight: bold;" onchange="loadAnalyticsData('personal')">
+                <!-- 選項會由 JS 自動生成 -->
+            </select>
         </div>
         
         <div class="card" style="margin-top:0;">
@@ -542,6 +548,13 @@
         function openAnalyticsPage() {
             switchView('view-analytics');
             document.querySelectorAll('.nav-item')[3].classList.add('active');
+            
+            // 👇 新增：動態生成群組成員選單，並預設選擇自己
+            const select = document.getElementById('ana-user-select');
+            select.innerHTML = groupMembers.map(m => 
+                `<option value="${m.user_id}" ${m.user_id === currentUserId ? 'selected' : ''}>${m.user_name} 的消費分析</option>`
+            ).join('');
+
             loadAnalyticsData(currentAnaType);
         }
 
@@ -550,8 +563,17 @@
             document.getElementById('tab-ana-group').classList.toggle('active', type === 'group');
             document.getElementById('tab-ana-personal').classList.toggle('active', type === 'personal');
             
+            // 👇 新增：判斷是否顯示成員選擇器，並抓取選擇的成員 ID
+            const memberSelector = document.getElementById('ana-member-selector');
+            memberSelector.style.display = type === 'personal' ? 'block' : 'none';
+            
+            let targetUserId = currentUserId; // 預設為自己
+            if (type === 'personal') {
+                targetUserId = document.getElementById('ana-user-select').value || currentUserId;
+            }
+            
             // 向後端請求最原始的明細資料 (過濾轉帳)
-            const res = await fetch(`/api/analytics?user_id=${currentUserId}&mode=${type}&group_id=${activeGroupId}`);
+            const res = await fetch(`/api/analytics?user_id=${targetUserId}&mode=${type}&group_id=${activeGroupId}`);
             rawAnalyticsData = await res.json();
             
             renderTimePeriods(); // 重繪時間選擇器並觸發渲染

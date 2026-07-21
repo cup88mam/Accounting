@@ -157,17 +157,20 @@ async def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1)
         res = supabase.table('expenses').select('expense_date, category, amount, exchange_rate').eq('group_id', group_id).neq('category', '轉帳').execute()
         return [{"date": r['expense_date'], "category": r['category'], "cost": r['amount'] * r['exchange_rate']} for r in res.data]
     else:
-        splits_res = supabase.table('expense_splits').select('owed_amount, expense_id').eq('user_id', user_id).execute()
-        if not splits_res.data:
+        # 1. 優先抓出「當前群組內」所有的非轉帳支出 (解決跨群組資料污染問題)
+        group_exp_res = supabase.table('expenses').select('id, expense_date, category, exchange_rate').eq('group_id', group_id).neq('category', '轉帳').execute()
+        if not group_exp_res.data:
             return []
             
-        exp_ids = [s['expense_id'] for s in splits_res.data]
-        exp_res = supabase.table('expenses').select('id, expense_date, category, exchange_rate').in_('id', exp_ids).neq('category', '轉帳').execute()
-        exp_dict = {e['id']: e for e in exp_res.data}
-
+        group_exp_dict = {e['id']: e for e in group_exp_res.data}
+        group_exp_ids = list(group_exp_dict.keys())
+        
+        # 2. 用這些本群的支出 ID，去 splits 表尋找指定成員(user_id) 應付的金額
+        splits_res = supabase.table('expense_splits').select('owed_amount, expense_id').eq('user_id', user_id).in_('expense_id', group_exp_ids).execute()
+        
         data = []
         for s in splits_res.data:
-            e = exp_dict.get(s['expense_id'])
+            e = group_exp_dict.get(s['expense_id'])
             if e:
                 data.append({
                     "date": e['expense_date'],
