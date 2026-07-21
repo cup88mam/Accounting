@@ -19,10 +19,11 @@ def process_receipt(image_path):
         【欄位嚴格定義】
         1. description: 商店名稱或主要消費類別。
         2. amount: 整張帳單的「最終付款總額」。必須是純數字。
-        3. notes: 「純字串」。將各個小項目明細整理成一段文字。
+        3. notes: 「純字串」。整理其他不屬於明細的備註。
         4. category: 請從「飲食」、「交通」、「住宿」、「娛樂」、「購物」、「一般支出」中選擇最適合的一項。
-        5. date: 消費日期。請從圖片中尋找，格式必須為 YYYY/MM/DD (例如 2026/07/17)。若找不到，請填入 {today_str}。
-        6. currency: 幣別。請判斷幣別，且「只能」輸出 "TWD"、"JPY" 或 "USD" 其中之一。(台灣發票/新台幣請務必輸出 "TWD")
+        5. date: 消費日期。請從圖片中尋找，格式為 YYYY/MM/DD。若找不到，請填入 {today_str}。
+        6. currency: 幣別。且「只能」輸出 "TWD"、"JPY" 或 "USD"。(台灣發票請務必輸出 "TWD")
+        7. items: 陣列。擷取每一項購買的商品明細，必須包含 name (商品名), price (該項總價, 純數字)。若無明細則回傳空陣列 []。
         
         【輸出規則】
         必須且只能回傳一個完全符合以下結構的 JSON 物件：
@@ -32,7 +33,11 @@ def process_receipt(image_path):
             "currency": "TWD",
             "date": "2026/07/17",
             "category": "飲食",
-            "notes": "明細1, 明細2..."
+            "notes": "無其他備註",
+            "items": [
+                {{"name": "商品A", "price": 300}},
+                {{"name": "商品B", "price": 700}}
+            ]
         }}
         """
 

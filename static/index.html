@@ -103,6 +103,14 @@
         .custom-range-inputs input { background: transparent; color: var(--text-main); border: 1px solid #555; padding: 5px; border-radius: 4px; color-scheme: dark;}
         .ana-total-label { font-size: 14px; color: var(--text-sub); }
         .ana-total-val { font-size: 32px; font-weight: bold; color: var(--primary-yellow); }
+
+        /* ===== 明細商品列表專用 CSS ===== */
+        .item-list-container { margin-top: 15px; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; background: #1a1a1a; display: none; }
+        .item-card { background: var(--card-dark); border: 1px solid #333; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
+        .item-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+        .item-input { background: #2a2a2a; border: none; color: var(--text-main); padding: 8px; border-radius: 4px; font-size: 14px; outline: none; }
+        .item-split-badge { background: #333; color: var(--text-sub); padding: 6px 12px; border-radius: 12px; font-size: 12px; cursor: pointer; border: 1px solid transparent; transition: 0.2s;}
+        .item-split-badge.active { background: rgba(251,192,45,0.1); color: var(--primary-yellow); border-color: var(--primary-yellow); font-weight: bold;}
     </style>
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
@@ -286,6 +294,15 @@
             <div id="split-members-container" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
         </div>
 
+        <!-- 新增：商品列表 (明細分帳) 區塊 -->
+        <div class="form-group" style="flex-direction: column; align-items: flex-start;" id="sec-items-wrapper">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+                <div style="font-weight:bold; color:var(--primary-yellow);">🛒 商品明細列表</div>
+                <button onclick="addItem()" class="btn-action" style="padding: 4px 10px; font-size: 12px;">＋新增商品</button>
+            </div>
+            <div id="items-container" class="item-list-container" style="width: 100%;"></div>
+        </div>
+
         <div class="form-group" style="align-items: flex-start;">
             <div style="margin-top: 8px;">圖片/收據</div>
             <div style="display: flex; flex-direction: column; gap: 12px; align-items: flex-end;">
@@ -333,6 +350,82 @@
     </div>
 
     <script>
+        let currentItems = [];
+
+        // 渲染商品列表
+        function renderItems() {
+            const container = document.getElementById('items-container');
+            const splitSec = document.getElementById('sec-split');
+            
+            if (currentItems.length === 0) {
+                container.style.display = 'none';
+                splitSec.style.opacity = '1';
+                splitSec.style.pointerEvents = 'auto';
+                document.querySelector('#sec-split > div').innerText = "替誰付錢 (參與分帳者)";
+                return;
+            }
+
+            container.style.display = 'block';
+            splitSec.style.opacity = '0.4'; // 變暗表示停用總額平分
+            splitSec.style.pointerEvents = 'none';
+            document.querySelector('#sec-split > div').innerText = "已啟用明細獨立分帳 (上方勾選無效)";
+
+            let html = '';
+            let totalAmount = 0;
+
+            currentItems.forEach((item, index) => {
+                let itemPrice = parseFloat(item.price) || 0;
+                totalAmount += itemPrice;
+
+                let badges = groupMembers.map(m => {
+                    let isActive = item.splitters.includes(m.user_id);
+                    return `<div class="item-split-badge ${isActive ? 'active' : ''}" onclick="toggleItemSplitter(${index}, '${m.user_id}')">${m.user_name}</div>`;
+                }).join('');
+
+                html += `
+                <div class="item-card">
+                    <div class="item-row">
+                        <span style="color:var(--text-sub); width:15px;">${index+1}</span>
+                        <input type="text" class="item-input" style="flex-grow:1;" value="${item.name}" onchange="updateItem(${index}, 'name', this.value)" placeholder="商品名稱">
+                        <input type="number" class="item-input" style="width:70px; color:var(--primary-yellow); text-align:right;" value="${item.price}" onchange="updateItem(${index}, 'price', this.value)" placeholder="金額">
+                        <span onclick="removeItem(${index})" style="color:#ff4444; cursor:pointer; font-size:20px; padding:0 5px;">×</span>
+                    </div>
+                    <div style="font-size:12px; color:var(--text-sub); margin:8px 0 6px;">分配給 (點擊切換)：</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px;">${badges}</div>
+                </div>`;
+            });
+            container.innerHTML = html;
+
+            // 自動更新總金額，確保帳目精準
+            document.getElementById('amount').value = totalAmount;
+            updateRate();
+        }
+
+        function addItem() {
+            // 預設將新商品分配給群組內所有人
+            currentItems.push({ name: '', price: 0, splitters: groupMembers.map(m=>m.user_id) });
+            renderItems();
+        }
+
+        function updateItem(index, field, value) {
+            currentItems[index][field] = value;
+            if (field === 'price') renderItems(); // 價格改變時重繪以更新總額
+        }
+
+        function removeItem(index) {
+            currentItems.splice(index, 1);
+            renderItems();
+        }
+
+        function toggleItemSplitter(itemIndex, userId) {
+            const splitters = currentItems[itemIndex].splitters;
+            const pos = splitters.indexOf(userId);
+            if (pos > -1) splitters.splice(pos, 1);
+            else splitters.push(userId);
+            renderItems();
+        }
+
+
         const LIFF_ID = "2010733190-GepcYGbG"; // 🚨 你的 LIFF ID
         let currentUserId = "me";
         let currentUserName = "我";
@@ -782,6 +875,7 @@
         }
 
         function resetForm() {
+            currentItems = []; renderItems();
             document.getElementById('edit_expense_id').value = "";
             document.getElementById('form-title').innerText = "新增支出";
             document.getElementById('description').value = "";
@@ -833,6 +927,11 @@
             if (data.group_id === 0) setExpenseType('personal');
             else if (data.category === '轉帳') setExpenseType('transfer');
             else setExpenseType('group');
+
+            if (data.items && data.items.length > 0) {
+                currentItems = data.items;
+            }
+            renderItems();
 
             document.getElementById('description').value = data.description;
             document.getElementById('amount').value = data.amount;
@@ -926,6 +1025,15 @@
                 if(result.category) document.getElementById('category').value = result.category;
                 if(result.notes) document.getElementById('notes').value = result.notes;
                 
+                if(result.items && result.items.length > 0) {
+                    currentItems = result.items.map(i => ({
+                        name: i.name,
+                        price: parseFloat(i.price) || 0,
+                        splitters: groupMembers.map(m=>m.user_id) // 預設平分給所有人
+                    }));
+                    renderItems();
+                }
+                
                 // --- 幣別防呆處理 ---
                 if(result.currency) {
                     let cur = result.currency.toUpperCase();
@@ -971,10 +1079,27 @@
                 splits.push({ user_id: receiverId, owed_amount: amt });
             } 
             else { 
-                const checked = document.querySelectorAll('.split-checkbox:checked');
-                if (checked.length === 0) return alert("請至少選擇一位分攤成員！");
-                const splitAmt = amt / checked.length;
-                checked.forEach(cb => splits.push({ user_id: cb.value, owed_amount: splitAmt }));
+                if (currentItems.length > 0) {
+                    // 🌟 全新邏輯：啟用了商品明細，分別計算每個人該付的加總
+                    let userTotals = {};
+                    currentItems.forEach(item => {
+                        const price = parseFloat(item.price) || 0;
+                        const splitters = item.splitters;
+                        if (splitters.length > 0) {
+                            const perPerson = price / splitters.length;
+                            splitters.forEach(uid => userTotals[uid] = (userTotals[uid] || 0) + perPerson);
+                        }
+                    });
+                    for (const [uid, owed] of Object.entries(userTotals)) {
+                        splits.push({ user_id: uid, owed_amount: owed });
+                    }
+                } else {
+                    // 原本邏輯：只依據總額平分
+                    const checked = document.querySelectorAll('.split-checkbox:checked');
+                    if (checked.length === 0) return alert("請至少選擇一位分攤成員！");
+                    const splitAmt = amt / checked.length;
+                    checked.forEach(cb => splits.push({ user_id: cb.value, owed_amount: splitAmt }));
+                }
             }
 
             const payload = {
@@ -989,6 +1114,7 @@
                 payer_id: finalPayer,
                 image_path: document.getElementById('saved_image_path').value,
                 splits: splits,
+                items: currentItems,  // 👇 新增這行傳送商品資料
                 current_user_name: currentUserName
             };
 

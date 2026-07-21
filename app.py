@@ -48,6 +48,7 @@ class ExpenseData(BaseModel):
     payer_id: str
     image_path: Optional[str] = None
     splits: List[SplitDetail]
+    items: Optional[list] = []  # 👇 新增這一行來接收商品清單
     current_user_name: str = "某人"
 
 class MemberData(BaseModel):
@@ -600,7 +601,7 @@ async def add_expense(data: ExpenseData):
             "group_id": data.group_id, "expense_date": data.expense_date, "category": data.category,
             "description": data.description, "notes": data.notes, "amount": data.amount,
             "currency": data.currency, "exchange_rate": data.exchange_rate, "payer_id": data.payer_id,
-            "image_path": data.image_path
+            "image_path": data.image_path, "items": data.items  # 👇 存入明細
         }
         exp_res = supabase.table("expenses").insert(expense_data).execute()
         expense_id = exp_res.data[0]["id"]
@@ -642,7 +643,8 @@ async def update_expense(expense_id: int, data: ExpenseData):
         expense_data = {
             "expense_date": data.expense_date, "category": data.category, "description": data.description,
             "notes": data.notes, "amount": data.amount, "currency": data.currency,
-            "exchange_rate": data.exchange_rate, "payer_id": data.payer_id, "image_path": data.image_path
+            "exchange_rate": data.exchange_rate, "payer_id": data.payer_id, "image_path": data.image_path,
+            "items": data.items  # 👇 更新明細
         }
         supabase.table("expenses").update(expense_data).eq("id", expense_id).execute()
         
