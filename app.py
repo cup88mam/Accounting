@@ -78,6 +78,30 @@ def log_activity(group_id, user_name, action_type, target_name, details=""):
         "action_type": action_type, "target_name": target_name, "details": details
     }).execute()
 
+def merge_virtual_member_if_exists(group_id: int, real_user_id: str, user_name: str):
+    # 如果自己就是虛擬帳號，就不做融合
+    if real_user_id.startswith("virtual_"):
+        return False
+
+    # 尋找同名、且 ID 是虛擬開頭的替身
+    res = supabase.table("group_members").select("user_id").eq("group_id", group_id).eq("user_name", user_name).like("user_id", "virtual_%").execute()
+    
+    if res.data:
+        virtual_id = res.data[0]["user_id"]
+        
+        # 1. 轉移付款紀錄
+        supabase.table("expenses").update({"payer_id": real_user_id}).eq("group_id", group_id).eq("payer_id", virtual_id).execute()
+        # 2. 轉移欠款與分攤紀錄
+        supabase.table("expense_splits").update({"user_id": real_user_id}).eq("user_id", virtual_id).execute()
+        # 3. 轉移活動紀錄
+        supabase.table("activities").update({"user_id": real_user_id}).eq("group_id", group_id).eq("user_id", virtual_id).execute()
+        
+        # 4. 銷毀虛擬替身
+        supabase.table("group_members").delete().eq("group_id", group_id).eq("user_id", virtual_id).execute()
+        return True
+        
+    return False
+
 def calculate_debts(group_id):
     # 1. 計算每個人付了多少錢
     exp_res = supabase.table('expenses').select('id, payer_id, amount, exchange_rate').eq('group_id', group_id).execute()
@@ -452,8 +476,13 @@ def handle_message(event):
         else: sender_name = line_bot_api.get_profile(sender_id).display_name
     except: pass
 
+    # (約在 handle_message 的中段)
     mem_res = supabase.table('group_members').select('*').eq('group_id', db_group_id).eq('user_id', sender_id).execute()
-    if not mem_res.data: supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': sender_id, 'user_name': sender_name}).execute()
+    if not mem_res.data:
+        supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': sender_id, 'user_name': sender_name}).execute()
+        
+    # ⚡ 無論是新加入還是早已存在，只要講話就檢查有沒有虛擬替身可以吞噬融合
+    merge_virtual_member_if_exists(db_group_id, sender_id, sender_name)
 
     def resolve_member(name):
         name = name.replace("@", "")
@@ -627,15 +656,29 @@ async def get_groups(user_id: str = None):
 @app.post("/api/groups/{group_id}/members")
 async def add_member(group_id: int, member: MemberData):
     try:
+        # 【防呆】阻擋在網頁上手動建立重複名稱的虛擬帳號
+        if member.user_id.startswith("virtual_"):
+            name_check = supabase.table("group_members").select("*").eq("group_id", group_id).eq("user_name", member.user_name).execute()
+            if name_check.data:
+                return {"status": "error", "message": "此名稱已存在，請換一個名字喔！"}
+
         exists = supabase.table("group_members").select("*").eq("group_id", group_id).eq("user_id", member.user_id).execute()
+        is_new = False
+        
         if not exists.data:
             supabase.table("group_members").insert({
                 "group_id": group_id, "user_id": member.user_id, "user_name": member.user_name
             }).execute()
-            log_activity(group_id, member.user_name, 'join', '加入了群組')
-            # 👇 多回傳 is_new: True，讓前端知道要不要跳通知
-            return {"status": "success", "is_new": True}
-        return {"status": "success", "is_new": False}
+            is_new = True
+            
+        # ⚡ 觸發自動融合引擎
+        merged = merge_virtual_member_if_exists(group_id, member.user_id, member.user_name)
+        
+        if is_new:
+            action_detail = '加入了群組 (並與同名虛擬帳號完成融合)' if merged else '加入了群組'
+            log_activity(group_id, member.user_name, 'join', action_detail)
+
+        return {"status": "success", "is_new": is_new}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

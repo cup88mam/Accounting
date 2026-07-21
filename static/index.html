@@ -840,15 +840,30 @@
             if (!name) return;
             const virtualId = "virtual_" + Date.now();
             try {
-                const res = await fetch(`/api/groups/${activeGroupId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: virtualId, user_name: name }) });
+                const res = await fetch(`/api/groups/${activeGroupId}/members`, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ user_id: virtualId, user_name: name }) 
+                });
+                
+                const data = await res.json();
+                
+                // 處理後端傳來的錯誤訊息 (例如重複命名)
+                if (data.status === "error") {
+                    alert("❌ " + data.message);
+                    return;
+                }
+                
                 if (res.ok) {
-                    alert(`成功建立虛擬成員「${name}」！`);
+                    alert(`✅ 成功建立虛擬成員「${name}」！`);
                     const mRes = await fetch(`/api/groups/${activeGroupId}/members`);
                     groupMembers = await mRes.json();
                     updateMemberDropdowns();
                     document.getElementById('payer').value = virtualId;
                     renderSplitCheckboxes();
-                } else alert("建立失敗");
+                } else {
+                    alert("建立失敗");
+                }
             } catch (err) { alert("連線錯誤"); }
         }
 
