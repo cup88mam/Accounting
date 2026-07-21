@@ -602,6 +602,7 @@ async def delete_group(group_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/groups")
 async def create_group(data: GroupCreate):
     try:
         res = supabase.table('groups').insert({'name': data.name}).execute()
@@ -611,7 +612,7 @@ async def create_group(data: GroupCreate):
         return {"status": "success", "group_id": group_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/api/groups")
 async def get_groups(user_id: str = None):
     if user_id:
