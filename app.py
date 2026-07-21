@@ -13,7 +13,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, FlexSendMessage, JoinEvent, FollowEvent, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, ImageMessage, FlexSendMessage, JoinEvent, FollowEvent, TextSendMessage
 from main_mistral import process_receipt
 from database import get_supabase_client, init_db
 
@@ -23,6 +23,7 @@ init_db()
 supabase = get_supabase_client()
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
+pending_receipts = {}
 
 # 為了確保在沒有上傳圖片時不報錯，保留 static 路徑設定
 os.makedirs("static/uploads", exist_ok=True)
@@ -299,11 +300,62 @@ def handle_follow(event):
 
 # === 核心：處理群組訊息 (選單、教學、文字記帳) ===
 # === 核心：處理群組訊息 (選單、教學、文字記帳 + 多國幣別支援) ===
+# === 處理圖片訊息 (對話式 AI 記帳第一步) ===
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image(event):
+    line_id = event.source.group_id if event.source.type == "group" else event.source.room_id if event.source.type == "room" else None
+    if not line_id:
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 討債工讀生：請在群組內上傳圖片喔！"))
+        return
+
+    message_content = line_bot_api.get_message_content(event.message.id)
+    temp_path = f"temp_{event.message.id}.jpg"
+    with open(temp_path, 'wb') as fd:
+        for chunk in message_content.iter_content():
+            fd.write(chunk)
+    
+    try:
+        from main_mistral import process_receipt
+        ai_data = process_receipt(temp_path)
+        if "error" in ai_data:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ 辨識失敗：{ai_data['error']}"))
+            return
+        
+        import base64
+        with open(temp_path, "rb") as file:
+            b64_image = base64.b64encode(file.read()).decode('utf-8')
+        imgbb_res = requests.post("https://api.imgbb.com/1/upload", data={"key": os.getenv("IMGBB_API_KEY"), "image": b64_image})
+        img_url = imgbb_res.json()["data"]["display_url"] if imgbb_res.status_code == 200 else ""
+
+        pending_receipts[line_id] = {
+            "ai_data": ai_data,
+            "img_url": img_url
+        }
+
+        reply = (
+            f"📸 討債工讀生看懂了！\n"
+            f"✅ 項目：{ai_data.get('description', '未命名')}\n"
+            f"💰 總額：{ai_data.get('amount', 0):g} {ai_data.get('currency', 'TWD')}\n"
+            f"📅 日期：{ai_data.get('date', '')}\n\n"
+            f"👉🏿 這筆錢要怎麼算？請直接回覆我：\n"
+            f"1️⃣ 回覆【平分】(全群幫你平分)\n"
+            f"2️⃣ 或用原指令 (例: @小龍 欠我 {ai_data.get('amount', 0):g})\n"
+            f"3️⃣ 回覆【取消】不記這筆"
+        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        
+    except Exception as e:
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ 發生錯誤：{str(e)}"))
+    finally:
+        if os.path.exists(temp_path): os.remove(temp_path)
+
+
+# === 核心：處理群組訊息 (選單、教學、文字記帳 + 多國幣別支援) ===
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text.strip()
     
-    # --- 1. 處理教學選單 (加入多幣別說明) ---
+    # --- 1. 處理教學選單 ---
     if msg in ["教學", "指令", "快速指令"]:
         tutorial_flex = FlexSendMessage(
             alt_text="快速記帳指令教學",
@@ -332,18 +384,15 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, tutorial_flex)
         return
 
-    # --- 2. 獲取 LINE 聊天室 ID 並建立/尋找資料庫群組 ---
+    # --- 2. 獲取 LINE 聊天室 ID ---
     line_id = None
-    if event.source.type == "group":
-        line_id = event.source.group_id
-    elif event.source.type == "room":
-        line_id = event.source.room_id
+    if event.source.type == "group": line_id = event.source.group_id
+    elif event.source.type == "room": line_id = event.source.room_id
         
     db_group_id = None
     if line_id:
         res = supabase.table('groups').select('id').eq('line_group_id', line_id).execute()
-        if res.data:
-            db_group_id = res.data[0]['id']
+        if res.data: db_group_id = res.data[0]['id']
         else:
             ins = supabase.table('groups').insert({'name': '💬 聊天室專屬群組', 'line_group_id': line_id}).execute()
             db_group_id = ins.data[0]['id']
@@ -390,24 +439,18 @@ def handle_message(event):
         return
 
     # --- 4. 處理自動文字記帳 (必須在群組內) ---
-    if not db_group_id:
-        return
+    if not db_group_id: return
 
     sender_id = event.source.user_id
     sender_name = "某人"
     try:
-        if event.source.type == "group":
-            sender_name = line_bot_api.get_group_member_profile(line_id, sender_id).display_name
-        elif event.source.type == "room":
-            sender_name = line_bot_api.get_room_member_profile(line_id, sender_id).display_name
-        else:
-            sender_name = line_bot_api.get_profile(sender_id).display_name
-    except:
-        pass
+        if event.source.type == "group": sender_name = line_bot_api.get_group_member_profile(line_id, sender_id).display_name
+        elif event.source.type == "room": sender_name = line_bot_api.get_room_member_profile(line_id, sender_id).display_name
+        else: sender_name = line_bot_api.get_profile(sender_id).display_name
+    except: pass
 
     mem_res = supabase.table('group_members').select('*').eq('group_id', db_group_id).eq('user_id', sender_id).execute()
-    if not mem_res.data:
-        supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': sender_id, 'user_name': sender_name}).execute()
+    if not mem_res.data: supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': sender_id, 'user_name': sender_name}).execute()
 
     def resolve_member(name):
         name = name.replace("@", "")
@@ -417,7 +460,6 @@ def handle_message(event):
         supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': vid, 'user_name': name}).execute()
         return vid
 
-    # 幣別判斷小工具 (與前端網頁的匯率同步)
     def normalize_currency(raw_text):
         if not raw_text: return "TWD", 1.0
         text = raw_text.upper()
@@ -425,7 +467,18 @@ def handle_message(event):
         if any(k in text for k in ['USD', '美金', '美元', 'US']): return "USD", 32.5
         return "TWD", 1.0
 
-    # 正則表達式偵測指令 (尾端加入可選的幣別捕獲群組)
+    # 檢查是否有未分配的收據
+    pending_data = pending_receipts.get(line_id)
+    if pending_data:
+        if msg == "取消":
+            del pending_receipts[line_id]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🗑️ 討債工讀生：已將這張收據撕毀作廢！"))
+            return
+        elif msg == "平分":
+            ai = pending_data["ai_data"]
+            msg = f"{ai.get('description', '一般支出')} {ai.get('amount', 0)} {ai.get('currency', 'TWD')}"
+
+    # 正則表達式偵測
     m_repay_1 = re.match(r'^@(\S+)\s+還我\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_repay_2 = re.match(r'^我還\s+@(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_debt_1 = re.match(r'^@(\S+)\s+欠我\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
@@ -479,18 +532,41 @@ def handle_message(event):
     if payer_id and splits:
         currency, exchange_rate = normalize_currency(raw_currency)
         
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        final_cat = category
+        final_date = datetime.now().strftime("%Y-%m-%d")
+        final_img = None
+        final_items = []
+
+        # 整合暫存收據資料
+        if pending_data:
+            ai = pending_data["ai_data"]
+            final_cat = ai.get("category", category)
+            final_date = ai.get("date", final_date)
+            final_img = pending_data.get("img_url")
+            final_items = ai.get("items", [])
+            
+            # 給商品預設分配所有人
+            if final_items:
+                all_m = [m['user_id'] for m in supabase.table('group_members').select('user_id').eq('group_id', db_group_id).execute().data]
+                for item in final_items:
+                    item['splitters'] = all_m
+
+            del pending_receipts[line_id]
+        
         exp_res = supabase.table('expenses').insert({
-            'group_id': db_group_id, 'expense_date': today_str, 'category': category,
-            'description': desc, 'amount': amount, 'currency': currency, 'exchange_rate': exchange_rate, 'payer_id': payer_id
+            'group_id': db_group_id, 'expense_date': final_date, 'category': final_cat,
+            'description': desc, 'amount': amount, 'currency': currency, 'exchange_rate': exchange_rate, 'payer_id': payer_id,
+            'image_path': final_img,
+            'items': final_items  # 👈 寫入明細商品
         }).execute()
         
         splits_data = [{"expense_id": exp_res.data[0]['id'], "user_id": s['user_id'], "owed_amount": s['owed_amount']} for s in splits]
         supabase.table('expense_splits').insert(splits_data).execute()
         log_activity(db_group_id, sender_name, 'add', desc, f"快速記帳 ({currency})")
 
-        # 超派回覆 (包含幣別提示)
-        reply = f"🔫 討債工讀生已火速記錄！\n✅ 項目：{desc}\n💰 總額：{amount:g} {currency}\n趕快點擊選單去追債吧！🤜🏿"
+        reply = f"🔫 討債工讀生已火速記錄！\n✅ 項目：{desc}\n💰 總額：{amount:g} {currency}\n"
+        if final_img: reply += "🧾 (已為您自動附上收據憑證)\n"
+        reply += "趕快點擊選單去追債吧！🤜🏿"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 
@@ -601,7 +677,7 @@ async def add_expense(data: ExpenseData):
             "group_id": data.group_id, "expense_date": data.expense_date, "category": data.category,
             "description": data.description, "notes": data.notes, "amount": data.amount,
             "currency": data.currency, "exchange_rate": data.exchange_rate, "payer_id": data.payer_id,
-            "image_path": data.image_path, "items": data.items  # 👇 存入明細
+            "image_path": data.image_path, "items": data.items  # 👈 補上寫入 items
         }
         exp_res = supabase.table("expenses").insert(expense_data).execute()
         expense_id = exp_res.data[0]["id"]
@@ -644,7 +720,7 @@ async def update_expense(expense_id: int, data: ExpenseData):
             "expense_date": data.expense_date, "category": data.category, "description": data.description,
             "notes": data.notes, "amount": data.amount, "currency": data.currency,
             "exchange_rate": data.exchange_rate, "payer_id": data.payer_id, "image_path": data.image_path,
-            "items": data.items  # 👇 更新明細
+            "items": data.items  # 👈 補上更新 items
         }
         supabase.table("expenses").update(expense_data).eq("id", expense_id).execute()
         
