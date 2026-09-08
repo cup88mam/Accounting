@@ -1,0 +1,4 @@
+git status
+git add .
+git commit -m "更新說明：例如修復分析頁面與群組建立"
+git push

@@ -5,4 +5,5 @@ python-dotenv
 mistralai
 supabase
 requests
-line-bot-sdk==3.5.0
+line-bot-sdk
+aiohttp>=3.9.0
