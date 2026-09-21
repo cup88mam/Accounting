@@ -203,6 +203,61 @@ async def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1)
                 })
         return data
 
+# ================= 成員管理 Pydantic 結構 =================
+class GroupMemberCreate(BaseModel):
+    group_id: int = 1
+    user_id: str
+    user_name: str
+
+class GroupMemberUpdate(BaseModel):
+    user_name: str
+
+# ================= 成員管理 API 路由 =================
+# 1. 取得群組成員
+@app.get("/api/groups/{group_id}/members")
+def get_group_members(group_id: int):
+    res = supabase.table("group_members").select("*").eq("group_id", group_id).execute()
+    return res.data
+
+# 2. 新增成員
+@app.post("/api/group_members")
+def add_group_member(member: GroupMemberCreate):
+    # 檢查是否已存在相同的 user_id
+    existing = supabase.table("group_members").select("*").eq("group_id", member.group_id).eq("user_id", member.user_id).execute()
+    if existing.data:
+        return {"status": "error", "message": "此成員 ID 已存在"}
+    
+    res = supabase.table("group_members").insert({
+        "group_id": member.group_id,
+        "user_id": member.user_id,
+        "user_name": member.user_name
+    }).execute()
+    return {"status": "success", "data": res.data}
+
+# 3. 修改成員名稱
+@app.put("/api/group_members/{group_id}/{user_id}")
+def update_group_member(group_id: int, user_id: str, data: GroupMemberUpdate):
+    res = supabase.table("group_members").update({
+        "user_name": data.user_name
+    }).eq("group_id", group_id).eq("user_id", user_id).execute()
+    return {"status": "success", "data": res.data}
+
+# 4. 刪除成員（含防呆外鍵檢查）
+@app.delete("/api/group_members/{group_id}/{user_id}")
+def delete_group_member(group_id: int, user_id: str):
+    # 防呆：檢查該成員是否在 expenses 或 expense_splits 中有歷史紀錄
+    has_payer = supabase.table("expenses").select("id").eq("group_id", group_id).eq("payer_id", user_id).execute()
+    has_splits = supabase.table("expense_splits").select("expense_id").eq("user_id", user_id).execute()
+    
+    if has_payer.data or has_splits.data:
+        return {
+            "status": "error", 
+            "message": "無法刪除：該成員已有相關記帳或分攤帳目紀錄。若刪除會導致分帳報表失真。"
+        }
+
+    supabase.table("group_members").delete().eq("group_id", group_id).eq("user_id", user_id).execute()
+    return {"status": "success"}
+
 @app.post("/callback")
 async def callback(request: Request, x_line_signature: str = Header(None)):
     body = await request.body()

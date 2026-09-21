@@ -148,6 +148,35 @@
         </div>
     </div>
 
+        <!-- 群組成員管理卡片 -->
+    <div class="card my-3 p-3">
+    <h4>群組成員名單管理</h4>
+    <div class="row g-2 mb-3">
+        <div class="col-5">
+        <input type="text" id="newUserId" class="form-control" placeholder="成員代號/ID (例如: bob)">
+        </div>
+        <div class="col-5">
+        <input type="text" id="newUserName" class="form-control" placeholder="成員顯示姓名 (例如: 小明)">
+        </div>
+        <div class="col-2">
+        <button class="btn btn-primary w-100" onclick="addMember()">新增</button>
+        </div>
+    </div>
+
+    <table class="table align-middle">
+        <thead>
+        <tr>
+            <th>顯示名稱</th>
+            <th>成員 ID</th>
+            <th style="width: 140px;">操作</th>
+        </tr>
+        </thead>
+        <tbody id="memberListBody">
+        <!-- 成員清單將由 JavaScript 動態填入 -->
+        </tbody>
+    </table>
+    </div>
+    
     <!-- ================= 視圖 2：完整紀錄 ================= -->
     <div id="view-records" class="view-section">
         <div class="header">所有討債紀錄</div>
