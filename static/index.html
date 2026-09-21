@@ -5,58 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title> 💸討債客戶端💸 </title>
     <style>
-        .member-manager-card { margin-top: 15px; }
-        .member-input-row { display: flex; gap: 8px; margin-bottom: 15px; }
-        .member-input { flex: 1; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 8px 10px; color: var(--text-main); font-size: 14px; outline: none; }
-        .member-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        .member-table th { padding: 8px; border-bottom: 1px solid var(--border-color); color: var(--text-sub); }
-        .member-table td { padding: 10px 8px; border-bottom: 1px solid #2a2a2a; }
-        .date-container{
-            display:flex;
-            justify-content:flex-end;
-            align-items:center;
-            width:100%;
-            cursor:pointer;
+        :root { 
+            --bg-dark: #121212; 
+            --card-dark: #1e1e1e; 
+            --text-main: #ffffff; 
+            --text-sub: #aaaaaa; 
+            --primary-yellow: #fbc02d; 
+            --border-color: #333333; 
         }
-
-        .date-display{
-            display:flex;
-            align-items:center;
-            justify-content:flex-end;
-            gap:2px;
-            width:100%;
-            color:var(--text-main);
-            font-size:16px;
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            margin: 0; 
+            background-color: var(--bg-dark); 
+            color: var(--text-main); 
+            padding-bottom: 80px;
         }
-
-        .date-text{
-            flex:0 0 auto;
-            text-align:left;
-            color:var(--text-main);
-            font-size:16px;
-        }
-
-        .custom-icon{
-            flex:0 0 auto;
-            color:var(--primary-yellow);
-            font-size:25px;
-        }
-
-        #expense_date{
-            position:absolute;
-            opacity:0;
-            width:1px;
-            height:1px;
-            pointer-events:none;
-        }
-        :root { --bg-dark: #121212; --card-dark: #1e1e1e; --text-main: #ffffff; --text-sub: #aaaaaa; --primary-yellow: #fbc02d; --border-color: #333333; }
-        body { font-family: -apple-system, sans-serif; margin: 0; background-color: var(--bg-dark); color: var(--text-main); padding-bottom: 80px;}
         
         .view-section { display: none; padding-bottom: 20px; }
         .view-section.active { display: block; animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-        .header { padding: 15px 20px; font-size: 18px; text-align: center; border-bottom: 1px solid var(--border-color); font-weight: bold; position: sticky; top: 0; background: var(--bg-dark); z-index: 100;}
+        .header { 
+            padding: 15px 20px; 
+            font-size: 18px; 
+            text-align: center; 
+            border-bottom: 1px solid var(--border-color); 
+            font-weight: bold; 
+            position: sticky; 
+            top: 0; 
+            background: var(--bg-dark); 
+            z-index: 100;
+        }
         .header-btn { position: absolute; left: 15px; top: 15px; cursor: pointer; color: var(--primary-yellow); font-size: 16px;}
         .header-btn-right { position: absolute; right: 15px; top: 15px; cursor: pointer; color: var(--primary-yellow); font-size: 16px;}
 
@@ -78,6 +57,12 @@
         .currency-selector { background-color: var(--primary-yellow); color: #000; border: none; padding: 8px 12px; border-radius: 20px; font-weight: bold; margin-right: 15px;}
         .amount-input { font-size: 32px; background: transparent; border: none; color: var(--text-main); outline: none; width: 100%;}
         
+        .date-container { display:flex; justify-content:flex-end; align-items:center; width:100%; cursor:pointer; }
+        .date-display { display:flex; align-items:center; justify-content:flex-end; gap:2px; width:100%; color:var(--text-main); font-size:16px; }
+        .date-text { flex:0 0 auto; text-align:left; color:var(--text-main); font-size:16px; }
+        .custom-icon { flex:0 0 auto; color:var(--primary-yellow); font-size:25px; }
+        #expense_date { position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; }
+
         .image-preview { width: 80px; height: 80px; background-color: #333; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; border: 1px dashed var(--primary-yellow);}
         .image-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .full-image-modal { position: fixed; top:0; left:0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; display: none; justify-content: center; align-items: center;}
@@ -96,21 +81,19 @@
         .nav-icon { font-size: 20px; }
         .nav-fab { background-color: var(--primary-yellow); color: #000; width: 45px; height: 45px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; margin-top: -25px; box-shadow: 0 4px 10px rgba(0,0,0,0.5);}
 
-        /* ===== 全新分析頁面元件 ===== */
+        /* 分析頁面元件 */
         .time-selector-wrap { display: inline-block; background: #2a2a2a; padding: 5px 12px; border-radius: 8px; margin-bottom: 15px; }
         .time-selector { background: #2a2a2a; color: var(--text-main); border: none; font-size: 14px; outline: none; }
-        
         .periods-scroller { display: flex; overflow-x: auto; gap: 10px; padding-bottom: 10px; margin-bottom: 15px; }
-        .periods-scroller::-webkit-scrollbar { display: none; } /* 隱藏滾動條 */
+        .periods-scroller::-webkit-scrollbar { display: none; }
         .period-pill { background: #333; color: var(--text-sub); padding: 8px 16px; border-radius: 20px; white-space: nowrap; font-size: 14px; cursor: pointer; transition: 0.2s;}
         .period-pill.active { background: var(--primary-yellow); color: #000; font-weight: bold; }
-        
         .custom-range-inputs { display: none; align-items: center; gap: 10px; margin-bottom: 20px; background: #2a2a2a; padding: 10px; border-radius: 8px;}
         .custom-range-inputs input { background: transparent; color: var(--text-main); border: 1px solid #555; padding: 5px; border-radius: 4px; color-scheme: dark;}
         .ana-total-label { font-size: 14px; color: var(--text-sub); }
         .ana-total-val { font-size: 32px; font-weight: bold; color: var(--primary-yellow); }
 
-        /* ===== 明細商品列表專用 CSS ===== */
+        /* 商品明細分帳 */
         .item-list-container { margin-top: 15px; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; background: #1a1a1a; display: none; }
         .item-card { background: var(--card-dark); border: 1px solid #333; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
         .item-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
@@ -169,16 +152,13 @@
             <div class="form-tab" id="tab-ana-personal" onclick="loadAnalyticsData('personal')">個人消費</div>
         </div>
         
-        <!-- 👇 新增：成員切換選擇器 (預設隱藏) -->
         <div id="ana-member-selector" style="display:none; padding: 0 20px 10px;">
             <select id="ana-user-select" class="form-control" style="background-color: #2a2a2a; border-radius: 8px; padding: 8px; text-align: center; width: 100%; color: var(--primary-yellow); font-weight: bold;" onchange="loadAnalyticsData('personal')">
-                <!-- 選項會由 JS 自動生成 -->
             </select>
         </div>
         
         <div class="card" style="margin-top:0;">
-            <!-- 時間維度選擇器 -->
-            <div class="time-selector-wrap" >
+            <div class="time-selector-wrap">
                 <select class="time-selector" id="ana-time-type" onchange="renderTimePeriods()">
                     <option value="daily">每日統計</option>
                     <option value="weekly">每週統計</option>
@@ -188,10 +168,8 @@
                 </select>
             </div>
 
-            <!-- 時間膠囊滾動區 (每日/週/月/年) -->
             <div class="periods-scroller" id="ana-periods-scroller" style="color: #000000;"></div>
 
-            <!-- 自訂區間選擇器 (隱藏/顯示) -->
             <div class="custom-range-inputs" id="ana-custom-range">
                 <input type="date" id="ana-start-date">
                 <span style="color:var(--text-sub);">至</span>
@@ -199,7 +177,6 @@
                 <button class="btn-action" onclick="applyCustomRange()">查詢</button>
             </div>
 
-            <!-- 總計顯示 -->
             <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px;">
                 <div class="ana-total-label"><span id="ana-display-label">7月</span> 總計</div>
                 <div class="ana-total-val" id="ana-display-total">$0</div>
@@ -211,42 +188,41 @@
         </div>
     </div>
 
-<!-- ================= 視圖 4：群組設定 ================= -->
-<div id="view-groups" class="view-section">
-    <div class="header">
-        <span class="header-btn" onclick="goBack()">🔙 返回</span>
-        群組設定
-    </div>
-    <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-weight: bold; font-size: 16px;">＋ 建立新群組</span>
-        <button class="btn-action" onclick="createNewGroup()">建立</button>
-    </div>
-    <div class="header" style="border:none; text-align: left; font-size: 16px;">我的群組</div>
-    <div id="group-list"></div>
-
-    <!-- 群組成員名單管理 (手機 RWD 優化版) -->
-<div class="card" style="margin-top: 15px; padding: 15px;">
-    <div style="font-weight: bold; font-size: 16px; margin-bottom: 12px; color: var(--primary-yellow);">群組成員名單管理</div>
-    
-    <!-- 輸入區：採彈性兩欄 + 全寬按鈕，避免按鈕被擠出螢幕 -->
-    <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px;">
-        <div style="display: flex; gap: 8px;">
-            <input type="text" id="newUserId" placeholder="成員代號/ID (例如: bob)" style="flex: 1; min-width: 0; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 10px; color: #fff; font-size: 14px; outline: none;">
-            <input type="text" id="newUserName" placeholder="姓名 (例如: 小明)" style="flex: 1; min-width: 0; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 10px; color: #fff; font-size: 14px; outline: none;">
+    <!-- ================= 視圖 4：群組設定 ================= -->
+    <div id="view-groups" class="view-section">
+        <div class="header">
+            <span class="header-btn" onclick="goBack()">🔙 返回</span>
+            群組設定
         </div>
-        <button class="btn-action" style="background: var(--primary-yellow); color: #000; font-weight: bold; width: 100%; justify-content: center; padding: 10px; border-radius: 8px;" onclick="addMember()">＋ 新增成員</button>
-    </div>
+        <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: bold; font-size: 16px;">＋ 建立新群組</span>
+            <button class="btn-action" onclick="createNewGroup()">建立</button>
+        </div>
+        <div class="header" style="border:none; text-align: left; font-size: 16px;">我的群組</div>
+        <div id="group-list"></div>
 
-    <!-- 清單列表容器 (捨棄 table 改用 flex 清單) -->
-    <div id="memberListBody" style="display: flex; flex-direction: column;">
-        <div style="text-align: center; color: gray; padding: 15px;">載入成員名單中...</div>
+        <!-- 群組成員名單管理 (手機 RWD 優化卡片) -->
+        <div class="card" style="margin-top: 15px; padding: 15px;">
+            <div style="font-weight: bold; font-size: 16px; margin-bottom: 12px; color: var(--primary-yellow);">群組成員名單管理</div>
+            
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px;">
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="newUserId" placeholder="成員代號/ID (例如: bob)" style="flex: 1; min-width: 0; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 10px; color: #fff; font-size: 14px; outline: none;">
+                    <input type="text" id="newUserName" placeholder="姓名 (例如: 小明)" style="flex: 1; min-width: 0; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 10px; color: #fff; font-size: 14px; outline: none;">
+                </div>
+                <button class="btn-action" style="background: var(--primary-yellow); color: #000; font-weight: bold; width: 100%; justify-content: center; padding: 10px; border-radius: 8px;" onclick="addMember()">＋ 新增成員</button>
+            </div>
+
+            <!-- 清單列表容器 (Flex 彈性列) -->
+            <div id="memberListBody" style="display: flex; flex-direction: column;">
+                <div style="text-align: center; color: gray; padding: 15px;">載入成員名單中...</div>
+            </div>
+        </div>
     </div>
-</div>
 
     <!-- ================= 視圖 5：新增 / 編輯表單 ================= -->
     <div id="view-form" class="view-section">
         <div class="header">
-            <!-- 修改這裡：將強制的 switchView('view-dashboard') 改為智慧返回 goBack() -->
             <span class="header-btn" onclick="goBack()">✖ 取消</span>
             <span id="form-title">新增支出</span>
         </div>
@@ -285,20 +261,10 @@
             <div class="date-container" onclick="openExpenseDatePicker()">
                 <div class="date-display">
                     <span class="custom-icon">📅</span>
-                    <span id="expense_date_text"
-                    class="date-text">
-                    </span>
-
-                    
-
+                    <span id="expense_date_text" class="date-text"></span>
                 </div>
-
-        <input
-            type="date"
-            id="expense_date"
-            onchange="updateExpenseDateDisplay()">
-
-        </div>
+                <input type="date" id="expense_date" onchange="updateExpenseDateDisplay()">
+            </div>
         </div>
         <div class="form-group">
             <div>名稱</div>
@@ -323,7 +289,6 @@
             <div id="split-members-container" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
         </div>
 
-        <!-- 新增：商品列表 (明細分帳) 區塊 -->
         <div class="form-group" style="flex-direction: column; align-items: flex-start;" id="sec-items-wrapper">
             <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
                 <div style="font-weight:bold; color:var(--primary-yellow);">🛒 商品明細列表</div>
@@ -374,127 +339,136 @@
             <div class="nav-icon">📊</div>分析
         </div>
         <div class="nav-item" onclick="switchView('view-groups')">
-            if (viewId === 'view-groups')
             <div class="nav-icon">⚙️</div>設定
         </div>
     </div>
 
     <script>
+        const LIFF_ID = "2010733190-GepcYGbG";
+        let currentUserId = "me";
+        let currentUserName = "我";
+        let activeGroupId = 1; 
+        let groupMembers = [];
+        let currentFileObj = null;
+        let currentExpenseType = 'group';
         let currentItems = [];
+        
+        let rawAnalyticsData = [];
+        let currentAnaType = 'group';
+        let anaFilterStart = '';
+        let anaFilterEnd = '';
+        let viewHistory = ['view-dashboard']; 
 
-        // 渲染群組成員名單表格
-// 手機版成員清單渲染
-async function renderMemberList() {
-    const container = document.getElementById("memberListBody");
-    if (!container) return;
+        // ================= 成員管理邏輯 (手機專用卡片) =================
+        async function renderMemberList() {
+            const container = document.getElementById("memberListBody");
+            if (!container) return;
 
-    try {
-        const res = await fetch(`/api/groups/${activeGroupId}/members`);
-        const members = await res.json();
-        groupMembers = members;
+            try {
+                const res = await fetch(`/api/groups/${activeGroupId}/members`);
+                const members = await res.json();
+                groupMembers = members;
 
-        if (!members || members.length === 0) {
-            container.innerHTML = `<div style="text-align:center; color:gray; padding:15px;">尚無成員資料</div>`;
-            return;
-        }
+                if (!members || members.length === 0) {
+                    container.innerHTML = `<div style="text-align:center; color:gray; padding:15px;">尚無成員資料</div>`;
+                    return;
+                }
 
-        container.innerHTML = members.map(m => `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2a2a2a;">
-                <!-- 左側：顯示名稱與自動省略的 ID -->
-                <div style="min-width: 0; flex: 1; padding-right: 8px;">
-                    <div style="font-weight: bold; font-size: 15px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                        ${m.user_name}
+                container.innerHTML = members.map(m => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2a2a2a;">
+                        <div style="min-width: 0; flex: 1; padding-right: 8px;">
+                            <div style="font-weight: bold; font-size: 15px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                ${m.user_name}
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
+                                ${m.user_id}
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                            <button class="btn-action" style="padding: 5px 10px; font-size: 12px; border-color: #aaaaaa; color: #aaaaaa;" onclick="editMember('${m.user_id}', '${m.user_name}')">改名</button>
+                            <button class="btn-action" style="padding: 5px 10px; font-size: 12px; border-color: #ff4444; color: #ff4444;" onclick="deleteMember('${m.user_id}')">刪除</button>
+                        </div>
                     </div>
-                    <div style="font-size: 11px; color: var(--text-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">
-                        ${m.user_id}
-                    </div>
-                </div>
-                <!-- 右側：改名與刪除按鈕 -->
-                <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                    <button class="btn-action" style="padding: 5px 10px; font-size: 12px; border-color: #aaaaaa; color: #aaaaaa;" onclick="editMember('${m.user_id}', '${m.user_name}')">改名</button>
-                    <button class="btn-action" style="padding: 5px 10px; font-size: 12px; border-color: #ff4444; color: #ff4444;" onclick="deleteMember('${m.user_id}')">刪除</button>
-                </div>
-            </div>
-        `).join('');
-    } catch (e) {
-        console.error("載入成員清單失敗：", e);
-        container.innerHTML = `<div style="text-align:center; color:#ff4444; padding:15px;">載入失敗</div>`;
-    }
-}
-
-// 新增成員
-async function addMember() {
-    const idInput = document.getElementById("newUserId");
-    const nameInput = document.getElementById("newUserName");
-    const user_id = idInput.value.trim();
-    const user_name = nameInput.value.trim();
-
-    if (!user_id || !user_name) {
-        alert("請輸入成員 ID 與姓名！");
-        return;
-    }
-
-    try {
-        const res = await fetch("/api/group_members", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ group_id: activeGroupId, user_id, user_name })
-        });
-        const data = await res.json();
-        if (data.status === "error") {
-            alert(data.message);
-        } else {
-            idInput.value = "";
-            nameInput.value = "";
-            await renderMemberList();
-            loadGroups(); // 同步更新記帳選單與儀表板成員
+                `).join('');
+            } catch (e) {
+                console.error("載入成員清單失敗：", e);
+                container.innerHTML = `<div style="text-align:center; color:#ff4444; padding:15px;">載入失敗</div>`;
+            }
         }
-    } catch (e) {
-        alert("新增成員失敗");
-    }
-}
 
-// 修改成員名稱
-async function editMember(userId, currentName) {
-    const newName = prompt(`請輸入 ${currentName} 的新姓名：`, currentName);
-    if (!newName || newName.trim() === currentName) return;
+        async function addMember() {
+            const idInput = document.getElementById("newUserId");
+            const nameInput = document.getElementById("newUserName");
+            const user_id = idInput.value.trim();
+            const user_name = nameInput.value.trim();
 
-    try {
-        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_name: newName.trim() })
-        });
-        const data = await res.json();
-        if (data.status === "success") {
-            await renderMemberList();
-            loadGroups();
+            if (!user_id || !user_name) {
+                alert("請完整輸入成員 ID 與姓名！");
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/group_members", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ group_id: activeGroupId, user_id, user_name })
+                });
+                const data = await res.json();
+                if (data.status === "error") {
+                    alert("❌ " + data.message);
+                } else {
+                    idInput.value = "";
+                    nameInput.value = "";
+                    await renderMemberList();
+                    loadGroups();
+                }
+            } catch (e) {
+                alert("新增成員失敗，請檢查網路連線");
+            }
         }
-    } catch (e) {
-        alert("修改失敗");
-    }
-}
 
-// 刪除成員
-async function deleteMember(userId) {
-    if (!confirm(`確定要刪除成員 (${userId}) 嗎？`)) return;
+        async function editMember(userId, currentName) {
+            const newName = prompt(`請輸入 ${currentName} 的新姓名：`, currentName);
+            if (!newName || newName.trim() === currentName) return;
 
-    try {
-        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
-            method: "DELETE"
-        });
-        const data = await res.json();
-        if (data.status === "error") {
-            alert(data.message);
-        } else {
-            await renderMemberList();
-            loadGroups();
+            try {
+                const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ user_name: newName.trim() })
+                });
+                const data = await res.json();
+                if (data.status === "success") {
+                    await renderMemberList();
+                    loadGroups();
+                } else {
+                    alert("修改失敗");
+                }
+            } catch (e) {
+                alert("修改發生錯誤");
+            }
         }
-    } catch (e) {
-        alert("刪除失敗");
-    }
-}
-        // 渲染商品列表
+
+        async function deleteMember(userId) {
+            if (!confirm(`確定要刪除成員 (${userId}) 嗎？`)) return;
+
+            try {
+                const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
+                    method: "DELETE"
+                });
+                const data = await res.json();
+                if (data.status === "error") {
+                    alert("⚠️ " + data.message);
+                } else {
+                    await renderMemberList();
+                    loadGroups();
+                }
+            } catch (e) {
+                alert("刪除失敗");
+            }
+        }
+
+        // ================= 明細分帳管理 =================
         function renderItems() {
             const container = document.getElementById('items-container');
             const splitSec = document.getElementById('sec-split');
@@ -508,7 +482,7 @@ async function deleteMember(userId) {
             }
 
             container.style.display = 'block';
-            splitSec.style.opacity = '0.4'; // 變暗表示停用總額平分
+            splitSec.style.opacity = '0.4';
             splitSec.style.pointerEvents = 'none';
             document.querySelector('#sec-split > div').innerText = "已啟用明細獨立分帳 (上方勾選無效)";
 
@@ -538,20 +512,18 @@ async function deleteMember(userId) {
             });
             container.innerHTML = html;
 
-            // 自動更新總金額，確保帳目精準
             document.getElementById('amount').value = totalAmount;
             updateRate();
         }
 
         function addItem() {
-            // 預設將新商品分配給群組內所有人
             currentItems.push({ name: '', price: 0, splitters: groupMembers.map(m=>m.user_id) });
             renderItems();
         }
 
         function updateItem(index, field, value) {
             currentItems[index][field] = value;
-            if (field === 'price') renderItems(); // 價格改變時重繪以更新總額
+            if (field === 'price') renderItems();
         }
 
         function removeItem(index) {
@@ -567,49 +539,24 @@ async function deleteMember(userId) {
             renderItems();
         }
 
-
-        const LIFF_ID = "2010733190-GepcYGbG"; // 🚨 你的 LIFF ID
-        let currentUserId = "me";
-        let currentUserName = "我";
-        let activeGroupId = 1; 
-        let groupMembers = [];
-        let currentFileObj = null;
-        let currentExpenseType = 'group'; // 'group', 'personal', 'transfer'
-        
-        // 分析系統用變數
-        let rawAnalyticsData = [];
-        let currentAnaType = 'group';
-        let anaFilterStart = '';
-        let anaFilterEnd = '';
+        // ================= 日期選擇處理 =================
         function openExpenseDatePicker() {
-
             const input = document.getElementById("expense_date");
-
-            if (input.showPicker) {
-                input.showPicker();
-            } else {
-                input.click();
-            }
-
+            if (input.showPicker) input.showPicker();
+            else input.click();
         }
 
         function updateExpenseDateDisplay() {
             const input = document.getElementById("expense_date");
-
             if (!input.value) {
                 document.getElementById("expense_date_text").textContent = "";
                 return;
             }
-
             const [y, m, d] = input.value.split("-");
-
-            document.getElementById("expense_date_text").textContent =
-                `${y}/${m}/${d}`;
+            document.getElementById("expense_date_text").textContent = `${y}/${m}/${d}`;
         }
 
-        // ===== 新增：歷史紀錄變數 =====
-        let viewHistory = ['view-dashboard']; 
-
+        // ================= 頁面初始化 =================
         window.onload = async () => {
             try {
                 await liff.init({ liffId: LIFF_ID });
@@ -620,13 +567,11 @@ async function deleteMember(userId) {
                 
                 const urlParams = new URLSearchParams(window.location.search);
                 
-                // 👉 直接接收機器人傳來的邀請碼
                 let targetGroupId = null;
                 if(urlParams.get('invite_group')) {
                     targetGroupId = await joinGroupViaInvite(urlParams.get('invite_group'));
                 }
 
-                // 如果有接收到邀請碼，強制將畫面切換到該群組
                 if (targetGroupId) {
                     activeGroupId = targetGroupId;
                 }
@@ -642,10 +587,9 @@ async function deleteMember(userId) {
             } catch (err) { console.error("LIFF Error:", err); }
         };
 
-        // ===== 修改：加入歷史堆疊追蹤的切換函數 =====
+        // ================= 視圖導覽切換 =================
         function switchView(viewId, isBack = false) {
             if (!isBack) {
-                // 如果點擊的是主選單頁面，將堆疊歸零；否則推入歷史
                 if (['view-dashboard', 'view-records', 'view-analytics'].includes(viewId)) {
                     viewHistory = [viewId];
                 } else if (viewHistory[viewHistory.length - 1] !== viewId) {
@@ -657,35 +601,31 @@ async function deleteMember(userId) {
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             document.getElementById(viewId).classList.add('active');
 
-            // 修正原本「群組設定」從下方導覽列點擊不會反黃的 UI 問題
             if (viewId === 'view-groups') {
                 const navItems = document.querySelectorAll('.nav-item');
                 if(navItems.length > 4) navItems[4].classList.add('active');
+                renderMemberList();
             }
         }
 
-        // ===== 新增：全域返回上一頁邏輯 =====
         function goBack() {
             if (viewHistory.length > 1) {
-                viewHistory.pop(); // 彈出當前視圖
-                const targetView = viewHistory[viewHistory.length - 1]; // 獲取上一個視圖
-                
-                // 依照不同頁面呼叫對應的 Reload 功能，確保資料同步並套用導覽列 active
+                viewHistory.pop();
+                const targetView = viewHistory[viewHistory.length - 1];
                 if (targetView === 'view-dashboard') loadDashboardView();
                 else if (targetView === 'view-records') loadRecordsView();
                 else if (targetView === 'view-analytics') openAnalyticsPage();
                 else switchView(targetView, true);
             } else {
-                loadDashboardView(); // 防止錯誤，預設退回首頁
+                loadDashboardView();
             }
         }
 
-        // ================= 全新：消費分析區塊 =================
+        // ================= 消費分析區塊 =================
         function openAnalyticsPage() {
             switchView('view-analytics');
             document.querySelectorAll('.nav-item')[3].classList.add('active');
             
-            // 👇 新增：動態生成群組成員選單，並預設選擇自己
             const select = document.getElementById('ana-user-select');
             select.innerHTML = groupMembers.map(m => 
                 `<option value="${m.user_id}" ${m.user_id === currentUserId ? 'selected' : ''}>${m.user_name} 的消費分析</option>`
@@ -699,20 +639,17 @@ async function deleteMember(userId) {
             document.getElementById('tab-ana-group').classList.toggle('active', type === 'group');
             document.getElementById('tab-ana-personal').classList.toggle('active', type === 'personal');
             
-            // 👇 新增：判斷是否顯示成員選擇器，並抓取選擇的成員 ID
             const memberSelector = document.getElementById('ana-member-selector');
             memberSelector.style.display = type === 'personal' ? 'block' : 'none';
             
-            let targetUserId = currentUserId; // 預設為自己
+            let targetUserId = currentUserId;
             if (type === 'personal') {
                 targetUserId = document.getElementById('ana-user-select').value || currentUserId;
             }
             
-            // 向後端請求最原始的明細資料 (過濾轉帳)
             const res = await fetch(`/api/analytics?user_id=${targetUserId}&mode=${type}&group_id=${activeGroupId}`);
             rawAnalyticsData = await res.json();
-            
-            renderTimePeriods(); // 重繪時間選擇器並觸發渲染
+            renderTimePeriods();
         }
 
         function renderTimePeriods() {
@@ -723,11 +660,10 @@ async function deleteMember(userId) {
             if (type === 'custom') {
                 scroller.style.display = 'none';
                 customDiv.style.display = 'flex';
-                // 預設填入本月
                 const today = new Date();
                 document.getElementById('ana-start-date').value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
                 document.getElementById('ana-end-date').value = today.toISOString().split('T')[0];
-                return; // 等待使用者按下查詢
+                return;
             }
 
             scroller.style.display = 'flex';
@@ -743,7 +679,7 @@ async function deleteMember(userId) {
                     periods.push({ start: dStr, end: dStr, label: lbl });
                 }
             } else if (type === 'weekly') {
-                let currentDay = today.getDay() || 7; // 1(Mon) - 7(Sun)
+                let currentDay = today.getDay() || 7;
                 let monday = new Date(today); monday.setDate(today.getDate() - currentDay + 1);
                 for (let i = 0; i < 10; i++) {
                     let s = new Date(monday); s.setDate(s.getDate() - i * 7);
@@ -754,7 +690,7 @@ async function deleteMember(userId) {
             } else if (type === 'monthly') {
                 for (let i = 0; i < 12; i++) {
                     let d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-                    let eD = new Date(d.getFullYear(), d.getMonth() + 1, 0); // 月底
+                    let eD = new Date(d.getFullYear(), d.getMonth() + 1, 0);
                     let lbl = (i===0 || d.getMonth()===11) ? `${d.getFullYear()}年${d.getMonth()+1}月` : `${d.getMonth()+1}月`;
                     periods.push({ start: d.toISOString().split('T')[0], end: eD.toISOString().split('T')[0], label: lbl });
                 }
@@ -765,12 +701,10 @@ async function deleteMember(userId) {
                 }
             }
 
-            // 渲染膠囊按鈕
             scroller.innerHTML = periods.map((p, i) => 
                 `<div class="period-pill ${i===0?'active':''}" onclick="selectAnaPeriod(this, '${p.start}', '${p.end}', '${p.label}')">${p.label}</div>`
             ).join('');
 
-            // 預設選擇第一個
             if(periods.length > 0) selectAnaPeriod(scroller.firstChild, periods[0].start, periods[0].end, periods[0].label);
         }
 
@@ -790,7 +724,6 @@ async function deleteMember(userId) {
             anaFilterEnd = end;
             document.getElementById('ana-display-label').innerText = label;
             
-            // 執行過濾與統計
             let filtered = rawAnalyticsData.filter(d => d.date >= start && d.date <= end);
             let catTotals = {};
             let grandTotal = 0;
@@ -802,7 +735,6 @@ async function deleteMember(userId) {
 
             document.getElementById('ana-display-total').innerText = `$${Math.round(grandTotal).toLocaleString()}`;
             
-            // 轉成陣列並排序
             let renderData = Object.keys(catTotals).map(k => ({ category: k, total: catTotals[k] })).sort((a,b) => b.total - a.total);
             
             let html = '';
@@ -841,11 +773,8 @@ async function deleteMember(userId) {
             balEl.innerText = myBal >= 0 ? `+$${myBal}` : `-$${Math.abs(myBal)}`;
             balEl.style.color = myBal >= 0 ? "#06C755" : "#ff4444";
 
-            // 👇 新增這行：讀取回傳的 members_map 並更新到畫面上
             const memberNames = Object.values(data.members_map).join(', ');
             document.getElementById('dash-members').innerText = `成員: ${memberNames}`;
-
-            // (下方維持原樣的 debtHtml 與 actHtml...)
 
             let debtHtml = '';
             data.debts.forEach(d => {
@@ -907,15 +836,12 @@ async function deleteMember(userId) {
             if (groups.length > 0) {
                 if(!activeGroupId || !groups.find(g=>g.id === activeGroupId)) activeGroupId = groups[0].id;
                 
-                // 直接顯示資料庫裡的名稱即可
                 const activeGroup = groups.find(g=>g.id === activeGroupId);
                 document.getElementById('dash-group-name').innerText = activeGroup.name;
                 
                 let html = '';
                 groups.forEach(g => {
                     let border = g.id === activeGroupId ? 'border:1px solid var(--primary-yellow);' : '';
-                    
-                    // 👇 加入了「改名」與「刪除」按鈕
                     html += `
                     <div class="card" style="display:flex; justify-content:space-between; align-items:center; ${border}">
                         <div style="font-weight:bold; flex-grow:1; cursor:pointer;" onclick="selectGroup(${g.id}, '${g.name}')">${g.name}</div>
@@ -959,12 +885,10 @@ async function deleteMember(userId) {
             });
             const data = await res.json();
             
-            // 只有真的是第一次加入才跳通知
             if (data.is_new) {
                 alert("✅ 已自動為您加入本聊天室的專屬群組！");
             }
             
-            // 保持網址乾淨，避免重新整理出問題
             const currentView = new URLSearchParams(window.location.search).get('view') || 'dashboard';
             window.history.replaceState({}, document.title, window.location.pathname + "?view=" + currentView);
             
@@ -984,7 +908,6 @@ async function deleteMember(userId) {
                 
                 const data = await res.json();
                 
-                // 處理後端傳來的錯誤訊息 (例如重複命名)
                 if (data.status === "error") {
                     alert("❌ " + data.message);
                     return;
@@ -997,6 +920,7 @@ async function deleteMember(userId) {
                     updateMemberDropdowns();
                     document.getElementById('payer').value = virtualId;
                     renderSplitCheckboxes();
+                    renderMemberList();
                 } else {
                     alert("建立失敗");
                 }
@@ -1058,9 +982,7 @@ async function deleteMember(userId) {
             const today = new Date();
             today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
 
-            document.getElementById("expense_date").value =
-                today.toISOString().split("T")[0];
-
+            document.getElementById("expense_date").value = today.toISOString().split("T")[0];
             updateExpenseDateDisplay();
             document.getElementById('btn-delete').style.display = "none";
             document.getElementById('saved_image_path').value = "";
@@ -1129,7 +1051,6 @@ async function deleteMember(userId) {
             if(data.image_path) {
                 document.getElementById('saved_image_path').value = data.image_path;
                 document.getElementById('img-preview').style.display = "flex";
-                // 判斷是否為雲端網址 (http開頭)
                 let imgSrc = data.image_path.startsWith('http') ? data.image_path : `/${data.image_path}`;
                 document.getElementById('img-preview').innerHTML = `<img src="${imgSrc}">`;
             }
@@ -1202,24 +1123,21 @@ async function deleteMember(userId) {
                     currentItems = result.items.map(i => ({
                         name: i.name,
                         price: parseFloat(i.price) || 0,
-                        splitters: groupMembers.map(m=>m.user_id) // 預設平分給所有人
+                        splitters: groupMembers.map(m=>m.user_id)
                     }));
                     renderItems();
                 }
                 
-                // --- 幣別防呆處理 ---
                 if(result.currency) {
                     let cur = result.currency.toUpperCase();
                     if(cur.includes('NT') || cur.includes('TW') || cur.includes('台')) cur = 'TWD';
                     else if(cur.includes('JP') || cur.includes('日')) cur = 'JPY';
                     else if(cur.includes('US') || cur.includes('美')) cur = 'USD';
-                    else cur = 'TWD'; // 預設為台幣
+                    else cur = 'TWD';
                     document.getElementById('currency').value = cur;
                 }
                 
-                // --- 日期防呆處理 ---
                 if(result.date) { 
-                    // 將可能出現的斜線 (2026/07/17) 強制轉換為橫槓 (2026-07-17)
                     let formattedDate = result.date.replace(/\//g, '-');
                     document.getElementById('expense_date').value = formattedDate;
                     updateExpenseDateDisplay(); 
@@ -1253,7 +1171,6 @@ async function deleteMember(userId) {
             } 
             else { 
                 if (currentItems.length > 0) {
-                    // 🌟 全新邏輯：啟用了商品明細，分別計算每個人該付的加總
                     let userTotals = {};
                     currentItems.forEach(item => {
                         const price = parseFloat(item.price) || 0;
@@ -1267,7 +1184,6 @@ async function deleteMember(userId) {
                         splits.push({ user_id: uid, owed_amount: owed });
                     }
                 } else {
-                    // 原本邏輯：只依據總額平分
                     const checked = document.querySelectorAll('.split-checkbox:checked');
                     if (checked.length === 0) return alert("請至少選擇一位分攤成員！");
                     const splitAmt = amt / checked.length;
@@ -1287,15 +1203,13 @@ async function deleteMember(userId) {
                 payer_id: finalPayer,
                 image_path: document.getElementById('saved_image_path').value,
                 splits: splits,
-                items: currentItems,  // 👇 新增這行傳送商品資料
+                items: currentItems,
                 current_user_name: currentUserName
             };
 
             const url = expenseId ? `/api/expenses/${expenseId}` : '/api/add_expense';
             await fetch(url, { method: expenseId ? 'PUT' : 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
             alert("儲存成功！");
-            
-            // ===== 修改：儲存後返回原操作頁面 =====
             goBack(); 
         }
 
@@ -1306,10 +1220,9 @@ async function deleteMember(userId) {
             
             await fetch(`/api/expenses/${expenseId}?group_id=${activeGroupId}&user_name=${currentUserName}&description=${desc}`, { method: 'DELETE' });
             alert("已刪除！");
-            
-            // ===== 修改：刪除後返回原操作頁面 =====
             goBack();
         }
+
         async function renameGroup(id, currentName) {
             const newName = prompt("請輸入新的群組名稱：", currentName);
             if (!newName || newName === currentName) return;
@@ -1321,8 +1234,6 @@ async function deleteMember(userId) {
                     body: JSON.stringify({ name: newName })
                 });
                 alert("名稱修改成功！");
-                
-                // 如果改的是當前群組，順便更新畫面上方的標題
                 if(id === activeGroupId) document.getElementById('dash-group-name').innerText = newName;
                 loadGroups();
             } catch (e) {
@@ -1336,120 +1247,14 @@ async function deleteMember(userId) {
             try {
                 await fetch(`/api/groups/${id}`, { method: 'DELETE' });
                 alert("群組已成功刪除！");
-                
                 if (activeGroupId === id) {
-                    activeGroupId = null; // 清除當前群組狀態，讓系統重新抓取別的群組
+                    activeGroupId = null;
                 }
                 loadGroups();
             } catch (e) {
                 alert("刪除失敗");
             }
         }
-    // 渲染成員清單到表格中
-async function renderMemberList() {
-    const tbody = document.getElementById("memberListBody");
-    if (!tbody) return;
-
-    try {
-        const res = await fetch(`/api/groups/${activeGroupId}/members`);
-        const members = await res.json();
-        groupMembers = members;
-
-        if (!members || members.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:gray; padding:15px;">尚無成員資料</td></tr>`;
-            return;
-        }
-
-        tbody.innerHTML = members.map(m => `
-            <tr style="border-bottom: 1px solid #2a2a2a;">
-                <td style="font-weight: bold; padding: 10px 4px;">${m.user_name}</td>
-                <td style="color: var(--text-sub); font-size: 12px; padding: 10px 4px;">${m.user_id}</td>
-                <td style="text-align: center; padding: 10px 4px;">
-                    <button class="btn-action" style="display:inline-block; padding:3px 8px; font-size:12px; margin-right:4px;" onclick="editMember('${m.user_id}', '${m.user_name}')">改名</button>
-                    <button class="btn-action" style="display:inline-block; padding:3px 8px; font-size:12px; border-color:#ff4444; color:#ff4444;" onclick="deleteMember('${m.user_id}')">刪除</button>
-                </td>
-            </tr>
-        `).join('');
-    } catch (e) {
-        console.error("載入成員清單失敗：", e);
-        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#ff4444; padding:15px;">載入失敗</td></tr>`;
-    }
-}
-
-// 新增成員
-async function addMember() {
-    const idInput = document.getElementById("newUserId");
-    const nameInput = document.getElementById("newUserName");
-    const user_id = idInput.value.trim();
-    const user_name = nameInput.value.trim();
-
-    if (!user_id || !user_name) {
-        alert("請完整輸入成員 ID 與姓名！");
-        return;
-    }
-
-    try {
-        const res = await fetch("/api/group_members", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ group_id: activeGroupId, user_id, user_name })
-        });
-        const data = await res.json();
-        if (data.status === "error") {
-            alert("❌ " + data.message);
-        } else {
-            idInput.value = "";
-            nameInput.value = "";
-            await renderMemberList();
-            loadDashboardView(); // 同步更新儀表板顯示
-        }
-    } catch (e) {
-        alert("新增成員失敗，請檢查網路連線");
-    }
-}
-
-// 修改成員名稱
-async function editMember(userId, currentName) {
-    const newName = prompt(`請輸入 ${currentName} 的新姓名：`, currentName);
-    if (!newName || newName.trim() === currentName) return;
-
-    try {
-        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_name: newName.trim() })
-        });
-        const data = await res.json();
-        if (data.status === "success") {
-            await renderMemberList();
-            loadDashboardView();
-        } else {
-            alert("修改失敗");
-        }
-    } catch (e) {
-        alert("修改發生錯誤");
-    }
-}
-
-// 刪除成員
-async function deleteMember(userId) {
-    if (!confirm(`確定要刪除成員 (${userId}) 嗎？`)) return;
-
-    try {
-        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
-            method: "DELETE"
-        });
-        const data = await res.json();
-        if (data.status === "error") {
-            alert("⚠️ " + data.message);
-        } else {
-            await renderMemberList();
-            loadDashboardView();
-        }
-    } catch (e) {
-        alert("刪除失敗");
-    }
-}
     </script>
 </body>
 </html>
