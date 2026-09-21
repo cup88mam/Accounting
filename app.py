@@ -539,12 +539,36 @@ def handle_message(event):
     # ⚡ 無論是新加入還是早已存在，只要講話就檢查有沒有虛擬替身可以吞噬融合
     merge_virtual_member_if_exists(db_group_id, sender_id, sender_name)
 
-    def resolve_member(name):
-        name = name.replace("@", "")
-        res = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).eq('user_name', name).execute()
-        if res.data: return res.data[0]['user_id']
-        vid = f"virtual_{int(time.time()*1000)}_{name}"
-        supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': vid, 'user_name': name}).execute()
+    # 智慧成員解析器：支援 LINE 原生 Mention 與空格比對
+    def resolve_member_smart(raw_name_or_id: str, db_group_id: int, event_mentions=None):
+        # 1. 優先檢查是否有 LINE 原生標註
+        if event_mentions and getattr(event_mentions, 'mentionees', None):
+            for m in event_mentions.mentionees:
+                target_uid = getattr(m, 'user_id', None)
+                if target_uid:
+                    # 確認此使用者在群組成員表中，若不在則補入
+                    mem = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).eq('user_id', target_uid).execute()
+                    if not mem.data:
+                        # 抓取 LINE 個人檔案取得真實暱稱
+                        try:
+                            p = line_bot_api.get_group_member_profile(event.source.group_id, target_uid)
+                            d_name = p.display_name
+                        except:
+                            d_name = "群組成員"
+                        supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': target_uid, 'user_name': d_name}).execute()
+                    return target_uid
+
+        # 2. 純文字比對（去除 @ 與頭尾空格）
+        clean_name = raw_name_or_id.replace("@", "").strip()
+        
+        # 不分大小寫比對既有成員 (ilike)
+        res = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).ilike('user_name', clean_name).execute()
+        if res.data:
+            return res.data[0]['user_id']
+
+        # 3. 都不符合才建立虛擬帳號
+        vid = f"virtual_{int(time.time()*1000)}_{clean_name}"
+        supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': vid, 'user_name': clean_name}).execute()
         return vid
 
     def normalize_currency(raw_text):
@@ -565,14 +589,12 @@ def handle_message(event):
             ai = pending_data["ai_data"]
             msg = f"{ai.get('description', '一般支出')} {ai.get('amount', 0)} {ai.get('currency', 'TWD')}"
 
-    # 正則表達式偵測
-    m_repay_1 = re.match(r'^@(\S+)\s+還我\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_repay_2 = re.match(r'^我還\s+@(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_debt_1 = re.match(r'^@(\S+)\s+欠我\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_debt_2 = re.match(r'^我欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_debt_3 = re.match(r'^@(\S+)\s+@(\S+)\s+各欠我\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_debt_4 = re.match(r'^@(\S+)\s+欠\s+@(\S+)\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_split_1 = re.match(r'^@(\S+)\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    # 支援空格的正則表達式配置
+    m_repay_1 = re.match(r'^@?(.+?)\s+還我\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_repay_2 = re.match(r'^我還\s+@?(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_debt_1  = re.match(r'^@?(.+?)\s+欠我\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_debt_2  = re.match(r'^我欠\s+@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_split_1 = re.match(r'^@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_split_2 = re.match(r'^(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
 
     payer_id, category, desc, amount, splits = None, "一般支出", "", 0.0, []
