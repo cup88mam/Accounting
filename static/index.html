@@ -225,24 +225,24 @@
     <div id="group-list"></div>
 
     <!-- 群組成員名單管理 -->
-    <div class="card member-manager-card">
-        <h5 style="margin-top: 0; margin-bottom: 12px; color: var(--primary-yellow);">群組成員名單管理</h5>
-        <div class="member-input-row">
-            <input type="text" id="newUserId" class="member-input" placeholder="成員代號/ID (例如: bob)">
-            <input type="text" id="newUserName" class="member-input" placeholder="成員姓名 (例如: 小明)">
-            <button class="btn-action" style="background: var(--primary-yellow); color: #000; font-weight: bold;" onclick="addMember()">新增</button>
+    <div class="card" style="margin-top: 15px;">
+        <div style="font-weight: bold; font-size: 16px; margin-bottom: 12px; color: var(--primary-yellow);">群組成員名單管理</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+            <input type="text" id="newUserId" placeholder="成員代號/ID (例如: bob)" style="flex: 1; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 8px 10px; color: #fff; font-size: 14px; outline: none;">
+            <input type="text" id="newUserName" placeholder="成員姓名 (例如: 小明)" style="flex: 1; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 8px 10px; color: #fff; font-size: 14px; outline: none;">
+            <button class="btn-action" style="background: var(--primary-yellow); color: #000; font-weight: bold; white-space: nowrap;" onclick="addMember()">新增</button>
         </div>
 
-        <table class="member-table">
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
             <thead>
-                <tr>
-                    <th style="text-align: left;">顯示名稱</th>
-                    <th style="text-align: left;">成員 ID</th>
-                    <th style="text-align: center; width: 110px;">操作</th>
+                <tr style="border-bottom: 1px solid #333; color: var(--text-sub);">
+                    <th style="text-align: left; padding: 8px 4px;">顯示名稱</th>
+                    <th style="text-align: left; padding: 8px 4px;">成員 ID</th>
+                    <th style="text-align: center; width: 110px; padding: 8px 4px;">操作</th>
                 </tr>
             </thead>
             <tbody id="memberListBody">
-                <!-- 成員資料動態載入 -->
+                <tr><td colspan="3" style="text-align: center; color: gray; padding: 15px;">載入成員名單中...</td></tr>
             </tbody>
         </table>
     </div>
@@ -379,6 +379,9 @@
             <div class="nav-icon">📊</div>分析
         </div>
         <div class="nav-item" onclick="switchView('view-groups')">
+            if (viewId === 'view-groups') {
+    renderMemberList(); // 👈 只要點進「設定」頁面就自動重繪清單
+}
             <div class="nav-icon">⚙️</div>設定
         </div>
     </div>
@@ -1339,6 +1342,111 @@ async function deleteMember(userId) {
                 alert("刪除失敗");
             }
         }
+    // 渲染成員清單到表格中
+async function renderMemberList() {
+    const tbody = document.getElementById("memberListBody");
+    if (!tbody) return;
+
+    try {
+        const res = await fetch(`/api/groups/${activeGroupId}/members`);
+        const members = await res.json();
+        groupMembers = members;
+
+        if (!members || members.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:gray; padding:15px;">尚無成員資料</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = members.map(m => `
+            <tr style="border-bottom: 1px solid #2a2a2a;">
+                <td style="font-weight: bold; padding: 10px 4px;">${m.user_name}</td>
+                <td style="color: var(--text-sub); font-size: 12px; padding: 10px 4px;">${m.user_id}</td>
+                <td style="text-align: center; padding: 10px 4px;">
+                    <button class="btn-action" style="display:inline-block; padding:3px 8px; font-size:12px; margin-right:4px;" onclick="editMember('${m.user_id}', '${m.user_name}')">改名</button>
+                    <button class="btn-action" style="display:inline-block; padding:3px 8px; font-size:12px; border-color:#ff4444; color:#ff4444;" onclick="deleteMember('${m.user_id}')">刪除</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error("載入成員清單失敗：", e);
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#ff4444; padding:15px;">載入失敗</td></tr>`;
+    }
+}
+
+// 新增成員
+async function addMember() {
+    const idInput = document.getElementById("newUserId");
+    const nameInput = document.getElementById("newUserName");
+    const user_id = idInput.value.trim();
+    const user_name = nameInput.value.trim();
+
+    if (!user_id || !user_name) {
+        alert("請完整輸入成員 ID 與姓名！");
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/group_members", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ group_id: activeGroupId, user_id, user_name })
+        });
+        const data = await res.json();
+        if (data.status === "error") {
+            alert("❌ " + data.message);
+        } else {
+            idInput.value = "";
+            nameInput.value = "";
+            await renderMemberList();
+            loadDashboardView(); // 同步更新儀表板顯示
+        }
+    } catch (e) {
+        alert("新增成員失敗，請檢查網路連線");
+    }
+}
+
+// 修改成員名稱
+async function editMember(userId, currentName) {
+    const newName = prompt(`請輸入 ${currentName} 的新姓名：`, currentName);
+    if (!newName || newName.trim() === currentName) return;
+
+    try {
+        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_name: newName.trim() })
+        });
+        const data = await res.json();
+        if (data.status === "success") {
+            await renderMemberList();
+            loadDashboardView();
+        } else {
+            alert("修改失敗");
+        }
+    } catch (e) {
+        alert("修改發生錯誤");
+    }
+}
+
+// 刪除成員
+async function deleteMember(userId) {
+    if (!confirm(`確定要刪除成員 (${userId}) 嗎？`)) return;
+
+    try {
+        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
+            method: "DELETE"
+        });
+        const data = await res.json();
+        if (data.status === "error") {
+            alert("⚠️ " + data.message);
+        } else {
+            await renderMemberList();
+            loadDashboardView();
+        }
+    } catch (e) {
+        alert("刪除失敗");
+    }
+}
     </script>
 </body>
 </html>
