@@ -737,9 +737,6 @@ async def add_member(group_id: int, member: MemberData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/groups/{group_id}/members")
-async def get_members(group_id: int):
-    return supabase.table("group_members").select("user_id, user_name").eq("group_id", group_id).execute().data
 
 @app.post("/api/scan-receipt")
 async def scan_receipt(file: UploadFile = File(...)):

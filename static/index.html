@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title> 💸討債客戶端💸 </title>
     <style>
+        .member-manager-card { margin-top: 15px; }
+        .member-input-row { display: flex; gap: 8px; margin-bottom: 15px; }
+        .member-input { flex: 1; background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 8px 10px; color: var(--text-main); font-size: 14px; outline: none; }
+        .member-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .member-table th { padding: 8px; border-bottom: 1px solid var(--border-color); color: var(--text-sub); }
+        .member-table td { padding: 10px 8px; border-bottom: 1px solid #2a2a2a; }
         .date-container{
             display:flex;
             justify-content:flex-end;
@@ -205,48 +211,42 @@
         </div>
     </div>
 
-    <!-- ================= 視圖 4：群組設定 ================= -->
-    <div id="view-groups" class="view-section">
-        <div class="header">
-            <!-- 修改這裡：將強制的 switchView('view-dashboard') 改為智慧返回 goBack() -->
-            <span class="header-btn" onclick="goBack()">🔙 返回</span>
-            群組設定
-        </div>
-        <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-weight: bold; font-size: 16px;">＋ 建立新群組</span>
-            <button class="btn-action" onclick="createNewGroup()">建立</button>
-        </div>
-        <div class="header" style="border:none; text-align: left; font-size: 16px;">我的群組</div>
-        <div id="group-list"></div>
-            <div class="card member-manager-card p-3 my-3">
+<!-- ================= 視圖 4：群組設定 ================= -->
+<div id="view-groups" class="view-section">
+    <div class="header">
+        <span class="header-btn" onclick="goBack()">🔙 返回</span>
+        群組設定
+    </div>
+    <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: bold; font-size: 16px;">＋ 建立新群組</span>
+        <button class="btn-action" onclick="createNewGroup()">建立</button>
+    </div>
+    <div class="header" style="border:none; text-align: left; font-size: 16px;">我的群組</div>
+    <div id="group-list"></div>
+
+    <!-- 群組成員名單管理 -->
+    <div class="card member-manager-card">
+        <h5 style="margin-top: 0; margin-bottom: 12px; color: var(--primary-yellow);">群組成員名單管理</h5>
+        <div class="member-input-row">
+            <input type="text" id="newUserId" class="member-input" placeholder="成員代號/ID (例如: bob)">
+            <input type="text" id="newUserName" class="member-input" placeholder="成員姓名 (例如: 小明)">
+            <button class="btn-action" style="background: var(--primary-yellow); color: #000; font-weight: bold;" onclick="addMember()">新增</button>
         </div>
 
-    <div class="card member-manager-card p-3 my-3">
-        <h5 class="text-light">群組成員名單管理</h5>
-        <div class="d-flex gap-2 mb-3">
-        <input type="text" id="newUserId" class="form-control" placeholder="成員代號/ID (例如: bob)">
-        <input type="text" id="newUserName" class="form-control" placeholder="成員姓名 (例如: 小明)">
-        <button class="btn btn-warning" onclick="addMember()">新增</button>
-        </div>
-
-        <table class="table table-dark table-hover align-middle">
-        <thead>
-            <tr>
-            <th>顯示名稱</th>
-            <th>成員 ID</th>
-            <th>操作</th>
-            </tr>
-        </thead>
-        <tbody id="memberListBody">
-            <!-- 成員資料動態載入 -->
-        </tbody>
+        <table class="member-table">
+            <thead>
+                <tr>
+                    <th style="text-align: left;">顯示名稱</th>
+                    <th style="text-align: left;">成員 ID</th>
+                    <th style="text-align: center; width: 110px;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="memberListBody">
+                <!-- 成員資料動態載入 -->
+            </tbody>
         </table>
     </div>
-
-    </div>
-
-    </div>
-    </div>
+</div>
 
     <!-- ================= 視圖 5：新增 / 編輯表單 ================= -->
     <div id="view-form" class="view-section">
@@ -386,6 +386,108 @@
     <script>
         let currentItems = [];
 
+        // 渲染群組成員名單表格
+async function renderMemberList() {
+    const tbody = document.getElementById("memberListBody");
+    if (!tbody) return;
+
+    try {
+        const res = await fetch(`/api/groups/${activeGroupId}/members`);
+        const members = await res.json();
+        groupMembers = members;
+
+        if (members.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-sub); padding:15px;">尚無成員</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = members.map(m => `
+            <tr>
+                <td style="font-weight:bold;">${m.user_name}</td>
+                <td style="color:var(--text-sub); font-size:12px;">${m.user_id}</td>
+                <td style="text-align:center;">
+                    <button class="btn-action" style="display:inline-block; padding:3px 8px; font-size:12px; margin-right:4px;" onclick="editMember('${m.user_id}', '${m.user_name}')">改名</button>
+                    <button class="btn-action" style="display:inline-block; padding:3px 8px; font-size:12px; border-color:#ff4444; color:#ff4444;" onclick="deleteMember('${m.user_id}')">刪除</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error("載入成員清單失敗：", e);
+    }
+}
+
+// 新增成員
+async function addMember() {
+    const idInput = document.getElementById("newUserId");
+    const nameInput = document.getElementById("newUserName");
+    const user_id = idInput.value.trim();
+    const user_name = nameInput.value.trim();
+
+    if (!user_id || !user_name) {
+        alert("請輸入成員 ID 與姓名！");
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/group_members", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ group_id: activeGroupId, user_id, user_name })
+        });
+        const data = await res.json();
+        if (data.status === "error") {
+            alert(data.message);
+        } else {
+            idInput.value = "";
+            nameInput.value = "";
+            await renderMemberList();
+            loadGroups(); // 同步更新記帳選單與儀表板成員
+        }
+    } catch (e) {
+        alert("新增成員失敗");
+    }
+}
+
+// 修改成員名稱
+async function editMember(userId, currentName) {
+    const newName = prompt(`請輸入 ${currentName} 的新姓名：`, currentName);
+    if (!newName || newName.trim() === currentName) return;
+
+    try {
+        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_name: newName.trim() })
+        });
+        const data = await res.json();
+        if (data.status === "success") {
+            await renderMemberList();
+            loadGroups();
+        }
+    } catch (e) {
+        alert("修改失敗");
+    }
+}
+
+// 刪除成員
+async function deleteMember(userId) {
+    if (!confirm(`確定要刪除成員 (${userId}) 嗎？`)) return;
+
+    try {
+        const res = await fetch(`/api/group_members/${activeGroupId}/${userId}`, {
+            method: "DELETE"
+        });
+        const data = await res.json();
+        if (data.status === "error") {
+            alert(data.message);
+        } else {
+            await renderMemberList();
+            loadGroups();
+        }
+    } catch (e) {
+        alert("刪除失敗");
+    }
+}
         // 渲染商品列表
         function renderItems() {
             const container = document.getElementById('items-container');
@@ -821,7 +923,7 @@
                 
                 const mRes = await fetch(`/api/groups/${activeGroupId}/members`);
                 groupMembers = await mRes.json();
-                
+                renderMemberList();
                 loadDashboardView();
             }
         }
