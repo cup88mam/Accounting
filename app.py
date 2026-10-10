@@ -406,13 +406,16 @@ def handle_image(event):
         import base64
         with open(temp_path, "rb") as file:
             b64_image = base64.b64encode(file.read()).decode('utf-8')
-        imgbb_res = requests.post("https://api.imgbb.com/1/upload", data={"key": os.getenv("IMGBB_API_KEY"), "image": b64_image})
-        img_url = imgbb_res.json()["data"]["display_url"] if imgbb_res.status_code == 200 else ""
-
-        pending_receipts[line_id] = {
-            "ai_data": ai_data,
-            "img_url": img_url
-        }
+        try:
+            imgbb_res = requests.post(
+                "https://api.imgbb.com/1/upload",
+                data={"key": os.getenv("IMGBB_API_KEY"), "image": b64_image},
+                timeout=10 # 👈 避免無限等待卡死
+            )
+            img_url = imgbb_res.json().get("data", {}).get("display_url", "") if imgbb_res.status_code == 200 else ""
+        except Exception as img_err:
+            print(f"ImgBB 上傳失敗或連線逾時：{img_err}")
+            img_url = "" # 上傳失敗時設為空字串，允許記帳流程繼續進行
 
         reply = (
             f"📸 討債工讀生看懂了！\n"
@@ -590,10 +593,14 @@ def handle_message(event):
             msg = f"{ai.get('description', '一般支出')} {ai.get('amount', 0)} {ai.get('currency', 'TWD')}"
 
     # 支援空格的正則表達式配置
+    # 補齊正則表達式定義
     m_repay_1 = re.match(r'^@?(.+?)\s+還我\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_repay_2 = re.match(r'^我還\s+@?(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_debt_1  = re.match(r'^@?(.+?)\s+欠我\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_debt_2  = re.match(r'^我欠\s+@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    # 👇 確保這兩行存在：
+    m_debt_3  = re.match(r'^@?(.+?)\s+@?(.+?)\s+各欠我\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_debt_4  = re.match(r'^@?(.+?)\s+欠\s+@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_split_1 = re.match(r'^@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_split_2 = re.match(r'^(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
 
