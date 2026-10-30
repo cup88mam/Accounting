@@ -6,6 +6,7 @@ import base64
 import asyncio
 import requests
 import uvicorn
+from urllib.parse import parse_qsl
 from fastapi import FastAPI, Request, HTTPException, Header, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
@@ -14,7 +15,10 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, ImageMessage, FlexSendMessage, JoinEvent, FollowEvent, TextSendMessage
+from linebot.models import (
+    MessageEvent, TextMessage, ImageMessage, FlexSendMessage, 
+    JoinEvent, FollowEvent, TextSendMessage, PostbackEvent
+)
 from main_mistral import process_receipt
 from database import get_supabase_client, init_db
 
@@ -26,7 +30,6 @@ line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 pending_receipts = {}
 
-# 為了確保在沒有上傳圖片時不報錯，保留 static 路徑設定
 os.makedirs("static/uploads", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -88,7 +91,6 @@ def merge_virtual_member_if_exists(group_id: int, real_user_id: str, user_name: 
     
     if res.data:
         virtual_id = res.data[0]["user_id"]
-        
         supabase.table("expenses").update({"payer_id": real_user_id}).eq("group_id", group_id).eq("payer_id", virtual_id).execute()
         supabase.table("expense_splits").update({"user_id": real_user_id}).eq("user_id", virtual_id).execute()
         supabase.table("activities").update({"user_id": real_user_id}).eq("group_id", group_id).eq("user_id", virtual_id).execute()
@@ -98,7 +100,6 @@ def merge_virtual_member_if_exists(group_id: int, real_user_id: str, user_name: 
     return False
 
 def calculate_debts(group_id):
-    # 1. 計算每個人付了多少錢 (包含一般支出與轉帳還款，以利抵銷債務)
     exp_res = supabase.table('expenses').select('id, payer_id, amount, exchange_rate').eq('group_id', group_id).execute()
     paid = {}
     expense_ids = []
@@ -106,7 +107,6 @@ def calculate_debts(group_id):
         paid[e['payer_id']] = paid.get(e['payer_id'], 0) + (e['amount'] * e['exchange_rate'])
         expense_ids.append(e['id'])
 
-    # 2. 計算每個人應該分攤多少錢
     owed = {}
     if expense_ids:
         splits_res = supabase.table('expense_splits').select('user_id, owed_amount, expense_id').in_('expense_id', expense_ids).execute()
@@ -115,7 +115,6 @@ def calculate_debts(group_id):
             rate = rates.get(s['expense_id'], 1.0)
             owed[s['user_id']] = owed.get(s['user_id'], 0) + (s['owed_amount'] * rate)
 
-    # 3. 計算淨值 (正數為債權人，負數為債務人)
     balances = {}
     all_users = set(paid.keys()).union(set(owed.keys()))
     for u in all_users:
@@ -129,7 +128,6 @@ def calculate_debts(group_id):
     debtors.sort(key=lambda x: x[1], reverse=True)
     creditors.sort(key=lambda x: x[1], reverse=True)
 
-    # 4. 結算演算法
     transactions = []
     i, j = 0, 0
     while i < len(debtors) and j < len(creditors):
@@ -149,17 +147,14 @@ def calculate_debts(group_id):
 
 @app.get("/api/groups/{group_id}/dashboard")
 def get_dashboard(group_id: int):
-    # 🌟 修改重點：總花費排除「轉帳」還款紀錄，只加總真實消費！
+    # 群組總計排除「轉帳」還款金額
     exp_res = supabase.table('expenses').select('amount, exchange_rate, category').eq('group_id', group_id).neq('category', '轉帳').execute()
     total_expense = sum([(e['amount'] * e['exchange_rate']) for e in exp_res.data])
     
-    # 取得成員名單
     mem_res = supabase.table('group_members').select('user_id, user_name').eq('group_id', group_id).execute()
     member_names = {m['user_id']: m['user_name'] for m in mem_res.data}
     
     balances, debts = calculate_debts(group_id)
-    
-    # 近期活動
     act_res = supabase.table('activities').select('*').eq('group_id', group_id).order('created_at', desc=True).limit(10).execute()
     
     return {
@@ -196,16 +191,7 @@ def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1):
                 })
         return data
 
-# ================= 成員管理 Pydantic 結構 =================
-class GroupMemberCreate(BaseModel):
-    group_id: int = 1
-    user_id: str
-    user_name: str
-
-class GroupMemberUpdate(BaseModel):
-    user_name: str
-
-# ================= 成員管理 API 路由 =================
+# ================= 成員管理 API =================
 @app.get("/api/groups/{group_id}/members")
 def get_group_members(group_id: int):
     res = supabase.table("group_members").select("*").eq("group_id", group_id).execute()
@@ -245,7 +231,7 @@ def delete_group_member(group_id: int, user_id: str):
     supabase.table("group_members").delete().eq("group_id", group_id).eq("user_id", user_id).execute()
     return {"status": "success"}
 
-# 🌟 移除 async，避免阻塞 Event Loop 造成 Cloud Run 逾時
+# ================= LINE Webhook 回調 =================
 @app.post("/callback")
 def callback(request: Request, x_line_signature: str = Header(None)):
     body = asyncio.run(request.body())
@@ -255,8 +241,110 @@ def callback(request: Request, x_line_signature: str = Header(None)):
         raise HTTPException(status_code=400, detail="Invalid signature")
     return {"status": "ok"}
 
+# 🌟 新增：處理點擊對話選單中的 Postback 加入事件
+@handler.add(PostbackEvent)
+def handle_postback(event):
+    data = event.postback.data
+    params = dict(parse_qsl(data))
+    
+    if params.get("action") == "join_group":
+        line_id = event.source.group_id if event.source.type == "group" else getattr(event.source, 'room_id', None)
+        user_id = event.source.user_id
+        target_group_id = int(params.get("group_id", 0))
+        
+        group_name = "本群組"
+        if target_group_id:
+            g_res = supabase.table('groups').select('id, name').eq('id', target_group_id).execute()
+            if g_res.data:
+                group_name = g_res.data[0]['name']
+        
+        user_name = "新朋友"
+        try:
+            if line_id:
+                p = line_bot_api.get_group_member_profile(line_id, user_id)
+            else:
+                p = line_bot_api.get_profile(user_id)
+            user_name = p.display_name
+        except Exception as e:
+            print(f"無法取得使用者資料: {e}")
+            
+        if not target_group_id:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 無法辨識群組 ID，請重新發送「選單」嘗試！"))
+            return
+
+        # 檢查是否已在名單中
+        mem_res = supabase.table('group_members').select('*').eq('group_id', target_group_id).eq('user_id', user_id).execute()
+        if mem_res.data:
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage(text=f"💡 @{user_name} 你已經在「{group_name}」記帳名單中囉！分帳時大家可以直接選你。")
+            )
+            return
+
+        # 寫入群組成員
+        supabase.table('group_members').insert({
+            'group_id': target_group_id,
+            'user_id': user_id,
+            'user_name': user_name
+        }).execute()
+
+        # 自動融合可能存在的同名虛擬帳號
+        merged = merge_virtual_member_if_exists(target_group_id, user_id, user_name)
+
+        action_detail = '點擊選單加入了群組 (並自動融合同名虛擬替身)' if merged else '點擊選單加入了群組'
+        log_activity(target_group_id, user_name, 'join', action_detail)
+
+        reply_msg = f"🎉 成功加入！\n【{user_name}】已加入「{group_name}」記帳名單！"
+        if merged:
+            reply_msg += "\n⚡ 偵測到同名虛擬帳號，已自動將歷史帳目合併到你的帳號！"
+        reply_msg += "\n之後大家記帳、分攤就能直接指名你囉 💰"
+
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+
 @handler.add(JoinEvent)
 def handle_join(event):
+    line_id = event.source.group_id if event.source.type == "group" else getattr(event.source, 'room_id', None)
+    db_group_id = None
+    if line_id:
+        res = supabase.table('groups').select('id').eq('line_group_id', line_id).execute()
+        if res.data:
+            db_group_id = res.data[0]['id']
+        else:
+            ins = supabase.table('groups').insert({'name': '💬 聊天室專屬群組', 'line_group_id': line_id}).execute()
+            db_group_id = ins.data[0]['id']
+
+    # 新人歡迎卡片：加入綠色的「點我加入記帳」按鍵
+    buttons = []
+    if db_group_id:
+        buttons.append({
+            "type": "button",
+            "style": "primary",
+            "height": "sm",
+            "color": "#06C755",
+            "action": {
+                "type": "postback",
+                "label": "🙋‍♂️ 點我加入記帳成員",
+                "data": f"action=join_group&group_id={db_group_id}",
+                "displayText": "🙋‍♂️ 我要加入記帳名單！"
+            }
+        })
+    buttons.extend([
+        {
+            "type": "button",
+            "style": "primary",
+            "height": "sm",
+            "color": "#fbc02d",
+            "action": { "type": "message", "label": "🔫 點我呼叫討債選單", "text": "選單" }
+        },
+        {
+            "type": "button",
+            "style": "secondary",
+            "height": "sm",
+            "color": "#444444",
+            "action": { "type": "message", "label": "📖 快速指令教學", "text": "教學" }
+        }
+    ])
+
     flex_welcome = FlexSendMessage(
         alt_text="👊🏿 討債工讀生來囉！🤜🏿",
         contents={
@@ -266,45 +354,17 @@ def handle_join(event):
                 "type": "box",
                 "layout": "vertical",
                 "contents": [
+                    { "type": "text", "text": "歡迎使用討債工讀生！🤜🏿", "weight": "bold", "size": "lg", "color": "#fbc02d" },
                     {
                         "type": "text",
-                        "text": "歡迎使用討債工讀生！🤜🏿",
-                        "weight": "bold",
-                        "size": "lg",
-                        "color": "#fbc02d"
-                    },
-                    {
-                        "type": "text",
-                        "text": "大家好！我是討債工讀生🤜🏿，很高興能加入這個群組幫大家輕鬆討債 💰\n\n🔫 快速使用提示：\n請直接點擊下方按鈕，我會立刻為大家送出討債目錄選單，或是教你怎麼用文字快速記帳！",
-                        "size": "sm",
-                        "color": "#ffffff",
-                        "margin": "md",
-                        "wrap": True
+                        "text": "大家好！我是討債工讀生🤜🏿，很高興能加入這個群組幫大家輕鬆討債 💰\n\n🔫 快速使用提示：\n請群組內成員直接點擊下方【綠色按鈕】一鍵登記加入分帳名單，即可輕鬆開始分帳！",
+                        "size": "sm", "color": "#ffffff", "margin": "md", "wrap": True
                     }
                 ],
                 "backgroundColor": "#1e1e1e"
             },
             "footer": {
-                "type": "box",
-                "layout": "vertical",
-                "spacing": "sm",
-                "contents": [
-                    {
-                        "type": "button",
-                        "style": "primary",
-                        "height": "sm",
-                        "color": "#fbc02d",
-                        "action": { "type": "message", "label": "🔫 點我呼叫討債選單", "text": "選單" }
-                    },
-                    {
-                        "type": "button",
-                        "style": "secondary",
-                        "height": "sm",
-                        "color": "#444444",
-                        "action": { "type": "message", "label": "📖 快速指令教學", "text": "教學" }
-                    }
-                ],
-                "backgroundColor": "#1e1e1e"
+                "type": "box", "layout": "vertical", "spacing": "sm", "contents": buttons, "backgroundColor": "#1e1e1e"
             }
         }
     )
@@ -321,20 +381,11 @@ def handle_follow(event):
                 "type": "box",
                 "layout": "vertical",
                 "contents": [
-                    {
-                        "type": "text",
-                        "text": "👊🏿 嗨！我是討債工讀生！🤜🏿",
-                        "weight": "bold",
-                        "size": "lg",
-                        "color": "#fbc02d"
-                    },
+                    { "type": "text", "text": "👊🏿 嗨！我是討債工讀生！🤜🏿", "weight": "bold", "size": "lg", "color": "#fbc02d" },
                     {
                         "type": "text",
                         "text": "感謝你將我加入好友 ✨\n\n💡 快速使用提示：\n把你跟朋友常用的 LINE 群組拉我進去，大家就能一起記帳！現在可以點擊下方按鈕測試功能：",
-                        "size": "sm",
-                        "color": "#ffffff",
-                        "margin": "md",
-                        "wrap": True
+                        "size": "sm", "color": "#ffffff", "margin": "md", "wrap": True
                     }
                 ],
                 "backgroundColor": "#1e1e1e"
@@ -344,20 +395,8 @@ def handle_follow(event):
                 "layout": "vertical",
                 "spacing": "sm",
                 "contents": [
-                    {
-                        "type": "button",
-                        "style": "primary",
-                        "height": "sm",
-                        "color": "#fbc02d",
-                        "action": { "type": "message", "label": "🔫 點我呼叫討債選單", "text": "選單" }
-                    },
-                    {
-                        "type": "button",
-                        "style": "secondary",
-                        "height": "sm",
-                        "color": "#444444",
-                        "action": { "type": "message", "label": "📖 快速指令教學", "text": "教學" }
-                    }
+                    { "type": "button", "style": "primary", "height": "sm", "color": "#fbc02d", "action": { "type": "message", "label": "🔫 點我呼叫討債選單", "text": "選單" } },
+                    { "type": "button", "style": "secondary", "height": "sm", "color": "#444444", "action": { "type": "message", "label": "📖 快速指令教學", "text": "教學" } }
                 ],
                 "backgroundColor": "#1e1e1e"
             }
@@ -397,7 +436,6 @@ def handle_image(event):
             print(f"ImgBB 上傳失敗或連線逾時：{img_err}")
             img_url = ""
 
-        # 儲存暫存收據資訊供下一句對話使用
         pending_receipts[line_id] = {
             "ai_data": ai_data,
             "img_url": img_url
@@ -424,7 +462,6 @@ def handle_image(event):
 def handle_message(event):
     msg = event.message.text.strip()
     
-    # --- 1. 處理教學選單 ---
     if msg in ["教學", "指令", "快速指令"]:
         tutorial_flex = FlexSendMessage(
             alt_text="快速記帳指令教學",
@@ -453,7 +490,6 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, tutorial_flex)
         return
 
-    # --- 2. 獲取 LINE 聊天室 ID ---
     line_id = None
     if event.source.type == "group": line_id = event.source.group_id
     elif event.source.type == "room": line_id = event.source.room_id
@@ -466,7 +502,7 @@ def handle_message(event):
             ins = supabase.table('groups').insert({'name': '💬 聊天室專屬群組', 'line_group_id': line_id}).execute()
             db_group_id = ins.data[0]['id']
 
-    # --- 3. 處理主選單呼叫 ---
+    # --- 呼叫主選單：加入綠色「點我加入記帳」按鍵 ---
     if msg in ["記帳", "選單"]:
         base_liff_url = "https://liff.line.me/2010733190-GepcYGbG"
         invite_param = f"&invite_group={db_group_id}" if db_group_id else ""
@@ -475,6 +511,28 @@ def handle_message(event):
         url_rec = f"{base_liff_url}?view=records{invite_param}"
         url_form = f"{base_liff_url}?view=form{invite_param}"
         url_ana = f"{base_liff_url}?view=analytics{invite_param}"
+
+        menu_buttons = []
+        if db_group_id:
+            menu_buttons.append({
+                "type": "button",
+                "style": "primary",
+                "height": "sm",
+                "color": "#06C755",
+                "action": {
+                    "type": "postback",
+                    "label": "🙋‍♂️ 點我加入記帳成員",
+                    "data": f"action=join_group&group_id={db_group_id}",
+                    "displayText": "🙋‍♂️ 我要加入記帳名單！"
+                }
+            })
+
+        menu_buttons.extend([
+            { "type": "button", "style": "primary", "height": "sm", "color": "#fbc02d", "action": { "type": "uri", "label": "🏠 前往首頁 (群組總覽)", "uri": url_dash } },
+            { "type": "button", "style": "primary", "height": "sm", "color": "#444444", "action": { "type": "uri", "label": "📃 查看所有紀錄", "uri": url_rec } },
+            { "type": "button", "style": "primary", "height": "sm", "color": "#fbc02d", "action": { "type": "uri", "label": "➕ 新增支出 (AI 辨識)", "uri": url_form } },
+            { "type": "button", "style": "primary", "height": "sm", "color": "#444444", "action": { "type": "uri", "label": "📊 消費數據分析", "uri": url_ana } }
+        ])
 
         flex_menu = FlexSendMessage(
             alt_text="功能選單目錄來囉！",
@@ -486,7 +544,7 @@ def handle_message(event):
                     "layout": "vertical",
                     "contents": [
                         { "type": "text", "text": "👊🏿 討債工讀生選單 🤜🏿", "weight": "bold", "size": "lg", "color": "#fbc02d" },
-                        { "type": "text", "text": "請選擇欲前往的討債頁面：", "size": "xs", "color": "#aaaaaa", "margin": "xs" }
+                        { "type": "text", "text": "請選擇欲前往的討債頁面或加入群組：", "size": "xs", "color": "#aaaaaa", "margin": "xs" }
                     ],
                     "backgroundColor": "#1e1e1e"
                 },
@@ -494,12 +552,7 @@ def handle_message(event):
                     "type": "box",
                     "layout": "vertical",
                     "spacing": "sm",
-                    "contents": [
-                        { "type": "button", "style": "primary", "height": "sm", "color": "#fbc02d", "action": { "type": "uri", "label": "🏠 前往首頁 (群組總覽)", "uri": url_dash } },
-                        { "type": "button", "style": "primary", "height": "sm", "color": "#444444", "action": { "type": "uri", "label": "📃 查看所有紀錄", "uri": url_rec } },
-                        { "type": "button", "style": "primary", "height": "sm", "color": "#fbc02d", "action": { "type": "uri", "label": "➕ 新增支出 (AI 辨識)", "uri": url_form } },
-                        { "type": "button", "style": "primary", "height": "sm", "color": "#444444", "action": { "type": "uri", "label": "📊 消費數據分析", "uri": url_ana } }
-                    ],
+                    "contents": menu_buttons,
                     "backgroundColor": "#1e1e1e"
                 }
             }
@@ -507,7 +560,6 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, flex_menu)
         return
 
-    # --- 4. 處理自動文字記帳 (必須在群組內) ---
     if not db_group_id: return
 
     sender_id = event.source.user_id
@@ -524,11 +576,9 @@ def handle_message(event):
         
     merge_virtual_member_if_exists(db_group_id, sender_id, sender_name)
 
-    # 🌟 統一成員解析器：支援 LINE 原生 Mention 與含空格的名字比對
     event_mentions = getattr(event.message, 'mention', None)
     
     def resolve_member(raw_name_or_id: str, mention_idx: int = 0):
-        # 1. 優先檢查是否有 LINE 原生標註
         if event_mentions and getattr(event_mentions, 'mentionees', None):
             mentionees = event_mentions.mentionees
             if mention_idx < len(mentionees):
@@ -544,13 +594,11 @@ def handle_message(event):
                         supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': target_uid, 'user_name': d_name}).execute()
                     return target_uid
 
-        # 2. 純文字比對（去除 @ 與頭尾空格，不分大小寫）
         clean_name = raw_name_or_id.replace("@", "").strip()
         res = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).ilike('user_name', clean_name).execute()
         if res.data:
             return res.data[0]['user_id']
 
-        # 3. 都不符合才建立虛擬帳號
         vid = f"virtual_{int(time.time()*1000)}_{clean_name}"
         supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': vid, 'user_name': clean_name}).execute()
         return vid
@@ -562,7 +610,6 @@ def handle_message(event):
         if any(k in text for k in ['USD', '美金', '美元', 'US']): return "USD", 32.5
         return "TWD", 1.0
 
-    # 檢查是否有未分配的收據
     pending_data = pending_receipts.get(line_id)
     if pending_data:
         if msg == "取消":
@@ -573,7 +620,6 @@ def handle_message(event):
             ai = pending_data["ai_data"]
             msg = f"{ai.get('description', '一般支出')} {ai.get('amount', 0)} {ai.get('currency', 'TWD')}"
 
-    # 支援空格的正則表達式配置
     m_repay_1 = re.match(r'^@?(.+?)\s+還我\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_repay_2 = re.match(r'^我還\s+@?(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_debt_1  = re.match(r'^@?(.+?)\s+欠我\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
@@ -662,7 +708,7 @@ def handle_message(event):
         reply += "趕快點擊選單去追債吧！🤜🏿"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
-# ================= 群組與帳務 API =================
+# ================= 支出與群組操作 API =================
 @app.put("/api/groups/{group_id}")
 def update_group(group_id: int, data: GroupUpdate):
     try:
