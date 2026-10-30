@@ -191,6 +191,14 @@ def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1):
                 })
         return data
 
+# ================= 成員管理 Pydantic 結構 =================
+class GroupMemberCreate(BaseModel):
+    group_id: int = 1
+    user_id: str
+    user_name: str
+
+class GroupMemberUpdate(BaseModel):
+    user_name: str
 # ================= 成員管理 API =================
 @app.get("/api/groups/{group_id}/members")
 def get_group_members(group_id: int):
