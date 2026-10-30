@@ -217,10 +217,12 @@ def get_supabase_client() -> TursoClient:
     return TursoClient(url, token)
 
 def init_db():
-    client = get_supabase_client()
-    if not client.url:
-        return
     try:
+        client = get_supabase_client()
+        if not client.url or not client.token:
+            print("⚠️ 警告: 尚未設定 TURSO_DATABASE_URL 或 TURSO_AUTH_TOKEN，略過資料表初始化")
+            return
+
         # 自動建立 SQLite / Turso 相容資料表
         client.execute_sql("""
             CREATE TABLE IF NOT EXISTS groups (
@@ -274,12 +276,11 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
-        # 確保預設群組存在
         client.execute_sql("INSERT OR IGNORE INTO groups (id, name) VALUES (1, '預設個人/群組')")
         client.execute_sql("INSERT OR IGNORE INTO group_members (group_id, user_id, user_name) VALUES (1, 'me', '我')")
         print("✅ 已成功連接並初始化 Turso (libSQL) 雲端資料庫！")
     except Exception as e:
-        print(f"❌ Turso 資料庫初始化失敗: {e}")
+        print(f"⚠️ Turso 資料庫初始化略過或連線受阻（不中斷服務啟動）: {e}")
 
 if __name__ == '__main__':
     init_db()
