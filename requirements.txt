@@ -3,7 +3,7 @@ uvicorn
 python-multipart
 python-dotenv
 mistralai
-supabase
 requests
 line-bot-sdk
 aiohttp>=3.9.0
+pydantic

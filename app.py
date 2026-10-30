@@ -3,6 +3,7 @@ from datetime import datetime
 import os
 import time
 import base64
+import asyncio
 import requests
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException, Header, UploadFile, File
@@ -30,7 +31,7 @@ os.makedirs("static/uploads", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
+def favicon():
     return Response(content=b"", media_type="image/x-icon")
 
 class SplitDetail(BaseModel):
@@ -49,7 +50,7 @@ class ExpenseData(BaseModel):
     payer_id: str
     image_path: Optional[str] = None
     splits: List[SplitDetail]
-    items: Optional[list] = []  # 👇 新增這一行來接收商品清單
+    items: Optional[list] = []
     current_user_name: str = "某人"
 
 class MemberData(BaseModel):
@@ -65,11 +66,12 @@ class LineGroupBind(BaseModel):
     line_group_id: str
     user_id: str
     user_name: str
+
 class GroupUpdate(BaseModel):
     name: str
 
 @app.get("/")
-async def read_index():
+def read_index():
     return FileResponse("static/index.html")
 
 def log_activity(group_id, user_name, action_type, target_name, details=""):
@@ -79,31 +81,24 @@ def log_activity(group_id, user_name, action_type, target_name, details=""):
     }).execute()
 
 def merge_virtual_member_if_exists(group_id: int, real_user_id: str, user_name: str):
-    # 如果自己就是虛擬帳號，就不做融合
     if real_user_id.startswith("virtual_"):
         return False
 
-    # 尋找同名、且 ID 是虛擬開頭的替身
-    res = supabase.table("group_members").select("user_id").eq("group_id", group_id).eq("user_name", user_name).like("user_id", "virtual_%").execute()
+    res = supabase.table("group_members").select("user_id").eq("group_id", group_id).ilike("user_name", user_name.strip()).like("user_id", "virtual_%").execute()
     
     if res.data:
         virtual_id = res.data[0]["user_id"]
         
-        # 1. 轉移付款紀錄
         supabase.table("expenses").update({"payer_id": real_user_id}).eq("group_id", group_id).eq("payer_id", virtual_id).execute()
-        # 2. 轉移欠款與分攤紀錄
         supabase.table("expense_splits").update({"user_id": real_user_id}).eq("user_id", virtual_id).execute()
-        # 3. 轉移活動紀錄
         supabase.table("activities").update({"user_id": real_user_id}).eq("group_id", group_id).eq("user_id", virtual_id).execute()
-        
-        # 4. 銷毀虛擬替身
         supabase.table("group_members").delete().eq("group_id", group_id).eq("user_id", virtual_id).execute()
         return True
         
     return False
 
 def calculate_debts(group_id):
-    # 1. 計算每個人付了多少錢
+    # 1. 計算每個人付了多少錢 (包含一般支出與轉帳還款，以利抵銷債務)
     exp_res = supabase.table('expenses').select('id, payer_id, amount, exchange_rate').eq('group_id', group_id).execute()
     paid = {}
     expense_ids = []
@@ -153,9 +148,9 @@ def calculate_debts(group_id):
     return balances, transactions
 
 @app.get("/api/groups/{group_id}/dashboard")
-async def get_dashboard(group_id: int):
-    # 總花費
-    exp_res = supabase.table('expenses').select('amount, exchange_rate').eq('group_id', group_id).execute()
+def get_dashboard(group_id: int):
+    # 🌟 修改重點：總花費排除「轉帳」還款紀錄，只加總真實消費！
+    exp_res = supabase.table('expenses').select('amount, exchange_rate, category').eq('group_id', group_id).neq('category', '轉帳').execute()
     total_expense = sum([(e['amount'] * e['exchange_rate']) for e in exp_res.data])
     
     # 取得成員名單
@@ -176,12 +171,11 @@ async def get_dashboard(group_id: int):
     }
 
 @app.get("/api/analytics")
-async def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1):
+def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1):
     if mode == 'group':
         res = supabase.table('expenses').select('expense_date, category, amount, exchange_rate').eq('group_id', group_id).neq('category', '轉帳').execute()
         return [{"date": r['expense_date'], "category": r['category'], "cost": r['amount'] * r['exchange_rate']} for r in res.data]
     else:
-        # 1. 優先抓出「當前群組內」所有的非轉帳支出 (解決跨群組資料污染問題)
         group_exp_res = supabase.table('expenses').select('id, expense_date, category, exchange_rate').eq('group_id', group_id).neq('category', '轉帳').execute()
         if not group_exp_res.data:
             return []
@@ -189,7 +183,6 @@ async def get_analytics(user_id: str, mode: str = 'personal', group_id: int = 1)
         group_exp_dict = {e['id']: e for e in group_exp_res.data}
         group_exp_ids = list(group_exp_dict.keys())
         
-        # 2. 用這些本群的支出 ID，去 splits 表尋找指定成員(user_id) 應付的金額
         splits_res = supabase.table('expense_splits').select('owed_amount, expense_id').eq('user_id', user_id).in_('expense_id', group_exp_ids).execute()
         
         data = []
@@ -213,16 +206,13 @@ class GroupMemberUpdate(BaseModel):
     user_name: str
 
 # ================= 成員管理 API 路由 =================
-# 1. 取得群組成員
 @app.get("/api/groups/{group_id}/members")
 def get_group_members(group_id: int):
     res = supabase.table("group_members").select("*").eq("group_id", group_id).execute()
     return res.data
 
-# 2. 新增成員
 @app.post("/api/group_members")
 def add_group_member(member: GroupMemberCreate):
-    # 檢查是否已存在相同的 user_id
     existing = supabase.table("group_members").select("*").eq("group_id", member.group_id).eq("user_id", member.user_id).execute()
     if existing.data:
         return {"status": "error", "message": "此成員 ID 已存在"}
@@ -234,7 +224,6 @@ def add_group_member(member: GroupMemberCreate):
     }).execute()
     return {"status": "success", "data": res.data}
 
-# 3. 修改成員名稱
 @app.put("/api/group_members/{group_id}/{user_id}")
 def update_group_member(group_id: int, user_id: str, data: GroupMemberUpdate):
     res = supabase.table("group_members").update({
@@ -242,10 +231,8 @@ def update_group_member(group_id: int, user_id: str, data: GroupMemberUpdate):
     }).eq("group_id", group_id).eq("user_id", user_id).execute()
     return {"status": "success", "data": res.data}
 
-# 4. 刪除成員（含防呆外鍵檢查）
 @app.delete("/api/group_members/{group_id}/{user_id}")
 def delete_group_member(group_id: int, user_id: str):
-    # 防呆：檢查該成員是否在 expenses 或 expense_splits 中有歷史紀錄
     has_payer = supabase.table("expenses").select("id").eq("group_id", group_id).eq("payer_id", user_id).execute()
     has_splits = supabase.table("expense_splits").select("expense_id").eq("user_id", user_id).execute()
     
@@ -258,17 +245,16 @@ def delete_group_member(group_id: int, user_id: str):
     supabase.table("group_members").delete().eq("group_id", group_id).eq("user_id", user_id).execute()
     return {"status": "success"}
 
+# 🌟 移除 async，避免阻塞 Event Loop 造成 Cloud Run 逾時
 @app.post("/callback")
-async def callback(request: Request, x_line_signature: str = Header(None)):
-    body = await request.body()
+def callback(request: Request, x_line_signature: str = Header(None)):
+    body = asyncio.run(request.body())
     try:
         handler.handle(body.decode("utf-8"), x_line_signature)
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="Invalid signature")
     return {"status": "ok"}
 
-# === 功能一：剛加入聊天室/群組時，自動提供使用提示（升級為按鈕卡片版） ===
-# === 功能一：剛加入聊天室/群組時，自動提供使用提示（雙按鈕升級版） ===
 @handler.add(JoinEvent)
 def handle_join(event):
     flex_welcome = FlexSendMessage(
@@ -379,10 +365,6 @@ def handle_follow(event):
     )
     line_bot_api.reply_message(event.reply_token, flex_welcome)
 
-
-# === 核心：處理群組訊息 (選單、教學、文字記帳) ===
-# === 核心：處理群組訊息 (選單、教學、文字記帳 + 多國幣別支援) ===
-# === 處理圖片訊息 (對話式 AI 記帳第一步) ===
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event):
     line_id = event.source.group_id if event.source.type == "group" else event.source.room_id if event.source.type == "room" else None
@@ -397,25 +379,29 @@ def handle_image(event):
             fd.write(chunk)
     
     try:
-        from main_mistral import process_receipt
         ai_data = process_receipt(temp_path)
         if "error" in ai_data:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ 辨識失敗：{ai_data['error']}"))
             return
         
-        import base64
         with open(temp_path, "rb") as file:
             b64_image = base64.b64encode(file.read()).decode('utf-8')
         try:
             imgbb_res = requests.post(
                 "https://api.imgbb.com/1/upload",
                 data={"key": os.getenv("IMGBB_API_KEY"), "image": b64_image},
-                timeout=10 # 👈 避免無限等待卡死
+                timeout=8
             )
             img_url = imgbb_res.json().get("data", {}).get("display_url", "") if imgbb_res.status_code == 200 else ""
         except Exception as img_err:
             print(f"ImgBB 上傳失敗或連線逾時：{img_err}")
-            img_url = "" # 上傳失敗時設為空字串，允許記帳流程繼續進行
+            img_url = ""
+
+        # 儲存暫存收據資訊供下一句對話使用
+        pending_receipts[line_id] = {
+            "ai_data": ai_data,
+            "img_url": img_url
+        }
 
         reply = (
             f"📸 討債工讀生看懂了！\n"
@@ -434,8 +420,6 @@ def handle_image(event):
     finally:
         if os.path.exists(temp_path): os.remove(temp_path)
 
-
-# === 核心：處理群組訊息 (選單、教學、文字記帳 + 多國幣別支援) ===
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text.strip()
@@ -534,37 +518,34 @@ def handle_message(event):
         else: sender_name = line_bot_api.get_profile(sender_id).display_name
     except: pass
 
-    # (約在 handle_message 的中段)
     mem_res = supabase.table('group_members').select('*').eq('group_id', db_group_id).eq('user_id', sender_id).execute()
     if not mem_res.data:
         supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': sender_id, 'user_name': sender_name}).execute()
         
-    # ⚡ 無論是新加入還是早已存在，只要講話就檢查有沒有虛擬替身可以吞噬融合
     merge_virtual_member_if_exists(db_group_id, sender_id, sender_name)
 
-    # 智慧成員解析器：支援 LINE 原生 Mention 與空格比對
-    def resolve_member_smart(raw_name_or_id: str, db_group_id: int, event_mentions=None):
+    # 🌟 統一成員解析器：支援 LINE 原生 Mention 與含空格的名字比對
+    event_mentions = getattr(event.message, 'mention', None)
+    
+    def resolve_member(raw_name_or_id: str, mention_idx: int = 0):
         # 1. 優先檢查是否有 LINE 原生標註
         if event_mentions and getattr(event_mentions, 'mentionees', None):
-            for m in event_mentions.mentionees:
-                target_uid = getattr(m, 'user_id', None)
+            mentionees = event_mentions.mentionees
+            if mention_idx < len(mentionees):
+                target_uid = getattr(mentionees[mention_idx], 'user_id', None)
                 if target_uid:
-                    # 確認此使用者在群組成員表中，若不在則補入
                     mem = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).eq('user_id', target_uid).execute()
                     if not mem.data:
-                        # 抓取 LINE 個人檔案取得真實暱稱
                         try:
-                            p = line_bot_api.get_group_member_profile(event.source.group_id, target_uid)
+                            p = line_bot_api.get_group_member_profile(line_id, target_uid)
                             d_name = p.display_name
                         except:
-                            d_name = "群組成員"
+                            d_name = raw_name_or_id.replace("@", "").strip() or "群組成員"
                         supabase.table('group_members').insert({'group_id': db_group_id, 'user_id': target_uid, 'user_name': d_name}).execute()
                     return target_uid
 
-        # 2. 純文字比對（去除 @ 與頭尾空格）
+        # 2. 純文字比對（去除 @ 與頭尾空格，不分大小寫）
         clean_name = raw_name_or_id.replace("@", "").strip()
-        
-        # 不分大小寫比對既有成員 (ilike)
         res = supabase.table('group_members').select('user_id').eq('group_id', db_group_id).ilike('user_name', clean_name).execute()
         if res.data:
             return res.data[0]['user_id']
@@ -593,47 +574,45 @@ def handle_message(event):
             msg = f"{ai.get('description', '一般支出')} {ai.get('amount', 0)} {ai.get('currency', 'TWD')}"
 
     # 支援空格的正則表達式配置
-    # 補齊正則表達式定義
     m_repay_1 = re.match(r'^@?(.+?)\s+還我\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_repay_2 = re.match(r'^我還\s+@?(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_debt_1  = re.match(r'^@?(.+?)\s+欠我\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_debt_2  = re.match(r'^我欠\s+@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    # 👇 確保這兩行存在：
     m_debt_3  = re.match(r'^@?(.+?)\s+@?(.+?)\s+各欠我\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
     m_debt_4  = re.match(r'^@?(.+?)\s+欠\s+@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_split_1 = re.match(r'^@?(.+?)\s+(.+?)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
-    m_split_2 = re.match(r'^(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_split_1 = re.match(r'^@(.+?)\s+(\S+)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
+    m_split_2 = re.match(r'^([^@\s]\S*)\s+([0-9.]+)\s*([A-Za-z$¥￥\u4e00-\u9fa5]*)?$', msg)
 
     payer_id, category, desc, amount, splits = None, "一般支出", "", 0.0, []
     raw_currency = ""
 
     if m_repay_1:
-        payer_id, amount, desc, category = resolve_member(m_repay_1.group(1)), float(m_repay_1.group(2)), "轉帳還款", "轉帳"
+        payer_id, amount, desc, category = resolve_member(m_repay_1.group(1), 0), float(m_repay_1.group(2)), "轉帳還款", "轉帳"
         raw_currency = m_repay_1.group(3)
         splits = [{"user_id": sender_id, "owed_amount": amount}]
     elif m_repay_2:
-        payer_id, receiver_id, amount, desc, category = sender_id, resolve_member(m_repay_2.group(1)), float(m_repay_2.group(2)), "轉帳還款", "轉帳"
+        payer_id, receiver_id, amount, desc, category = sender_id, resolve_member(m_repay_2.group(1), 0), float(m_repay_2.group(2)), "轉帳還款", "轉帳"
         raw_currency = m_repay_2.group(3)
         splits = [{"user_id": receiver_id, "owed_amount": amount}]
     elif m_debt_1:
-        debtor_id, desc, amount, payer_id = resolve_member(m_debt_1.group(1)), m_debt_1.group(2), float(m_debt_1.group(3)), sender_id
+        debtor_id, desc, amount, payer_id = resolve_member(m_debt_1.group(1), 0), m_debt_1.group(2), float(m_debt_1.group(3)), sender_id
         raw_currency = m_debt_1.group(4)
         splits = [{"user_id": debtor_id, "owed_amount": amount}]
     elif m_debt_2:
-        payer_id, desc, amount, debtor_id = resolve_member(m_debt_2.group(1)), m_debt_2.group(2), float(m_debt_2.group(3)), sender_id
+        payer_id, desc, amount, debtor_id = resolve_member(m_debt_2.group(1), 0), m_debt_2.group(2), float(m_debt_2.group(3)), sender_id
         raw_currency = m_debt_2.group(4)
         splits = [{"user_id": debtor_id, "owed_amount": amount}]
     elif m_debt_3:
-        d1_id, d2_id, desc, each_amount = resolve_member(m_debt_3.group(1)), resolve_member(m_debt_3.group(2)), m_debt_3.group(3), float(m_debt_3.group(4))
+        d1_id, d2_id, desc, each_amount = resolve_member(m_debt_3.group(1), 0), resolve_member(m_debt_3.group(2), 1), m_debt_3.group(3), float(m_debt_3.group(4))
         payer_id, amount = sender_id, each_amount * 2
         raw_currency = m_debt_3.group(5)
         splits = [{"user_id": d1_id, "owed_amount": each_amount}, {"user_id": d2_id, "owed_amount": each_amount}]
     elif m_debt_4:
-        debtor_id, payer_id, desc, amount = resolve_member(m_debt_4.group(1)), resolve_member(m_debt_4.group(2)), m_debt_4.group(3), float(m_debt_4.group(4))
+        debtor_id, payer_id, desc, amount = resolve_member(m_debt_4.group(1), 0), resolve_member(m_debt_4.group(2), 1), m_debt_4.group(3), float(m_debt_4.group(4))
         raw_currency = m_debt_4.group(5)
         splits = [{"user_id": debtor_id, "owed_amount": amount}]
     elif m_split_1:
-        payer_id, desc, amount = resolve_member(m_split_1.group(1)), m_split_1.group(2), float(m_split_1.group(3))
+        payer_id, desc, amount = resolve_member(m_split_1.group(1), 0), m_split_1.group(2), float(m_split_1.group(3))
         raw_currency = m_split_1.group(4)
         all_m = [m['user_id'] for m in supabase.table('group_members').select('user_id').eq('group_id', db_group_id).execute().data]
         if not all_m: all_m = [payer_id]
@@ -653,7 +632,6 @@ def handle_message(event):
         final_img = None
         final_items = []
 
-        # 整合暫存收據資料
         if pending_data:
             ai = pending_data["ai_data"]
             final_cat = ai.get("category", category)
@@ -661,7 +639,6 @@ def handle_message(event):
             final_img = pending_data.get("img_url")
             final_items = ai.get("items", [])
             
-            # 給商品預設分配所有人
             if final_items:
                 all_m = [m['user_id'] for m in supabase.table('group_members').select('user_id').eq('group_id', db_group_id).execute().data]
                 for item in final_items:
@@ -673,7 +650,7 @@ def handle_message(event):
             'group_id': db_group_id, 'expense_date': final_date, 'category': final_cat,
             'description': desc, 'amount': amount, 'currency': currency, 'exchange_rate': exchange_rate, 'payer_id': payer_id,
             'image_path': final_img,
-            'items': final_items  # 👈 寫入明細商品
+            'items': final_items
         }).execute()
         
         splits_data = [{"expense_id": exp_res.data[0]['id'], "user_id": s['user_id'], "owed_amount": s['owed_amount']} for s in splits]
@@ -685,12 +662,9 @@ def handle_message(event):
         reply += "趕快點擊選單去追債吧！🤜🏿"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
-
-
-# ================= 新增：修改與刪除 API =================
-
+# ================= 群組與帳務 API =================
 @app.put("/api/groups/{group_id}")
-async def update_group(group_id: int, data: GroupUpdate):
+def update_group(group_id: int, data: GroupUpdate):
     try:
         supabase.table('groups').update({'name': data.name}).eq('id', group_id).execute()
         return {"status": "success"}
@@ -698,9 +672,8 @@ async def update_group(group_id: int, data: GroupUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/groups/{group_id}")
-async def delete_group(group_id: int):
+def delete_group(group_id: int):
     try:
-        # 依序刪除相關資料，避免 Foreign Key 衝突報錯
         supabase.table('activities').delete().eq('group_id', group_id).execute()
         exp_res = supabase.table('expenses').select('id').eq('group_id', group_id).execute()
         exp_ids = [e['id'] for e in exp_res.data]
@@ -708,15 +681,13 @@ async def delete_group(group_id: int):
             supabase.table('expense_splits').delete().in_('expense_id', exp_ids).execute()
         supabase.table('expenses').delete().eq('group_id', group_id).execute()
         supabase.table('group_members').delete().eq('group_id', group_id).execute()
-        
-        # 最後刪除群組本身
         supabase.table('groups').delete().eq('id', group_id).execute()
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/groups")
-async def create_group(data: GroupCreate):
+def create_group(data: GroupCreate):
     try:
         res = supabase.table('groups').insert({'name': data.name}).execute()
         group_id = res.data[0]['id']
@@ -727,7 +698,7 @@ async def create_group(data: GroupCreate):
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/api/groups")
-async def get_groups(user_id: str = None):
+def get_groups(user_id: str = None):
     if user_id:
         mem_res = supabase.table('group_members').select('group_id').eq('user_id', user_id).execute()
         g_ids = [m['group_id'] for m in mem_res.data]
@@ -738,9 +709,8 @@ async def get_groups(user_id: str = None):
         return supabase.table('groups').select('id, name').execute().data
 
 @app.post("/api/groups/{group_id}/members")
-async def add_member(group_id: int, member: MemberData):
+def add_member(group_id: int, member: MemberData):
     try:
-        # 【防呆】阻擋在網頁上手動建立重複名稱的虛擬帳號
         if member.user_id.startswith("virtual_"):
             name_check = supabase.table("group_members").select("*").eq("group_id", group_id).eq("user_name", member.user_name).execute()
             if name_check.data:
@@ -755,7 +725,6 @@ async def add_member(group_id: int, member: MemberData):
             }).execute()
             is_new = True
             
-        # ⚡ 觸發自動融合引擎
         merged = merge_virtual_member_if_exists(group_id, member.user_id, member.user_name)
         
         if is_new:
@@ -766,12 +735,11 @@ async def add_member(group_id: int, member: MemberData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/scan-receipt")
-async def scan_receipt(file: UploadFile = File(...)):
+def scan_receipt(file: UploadFile = File(...)):
     temp_file_path = f"temp_scan_{file.filename}"
     with open(temp_file_path, "wb") as buffer:
-        buffer.write(await file.read())
+        buffer.write(file.file.read())
     try:
         result = process_receipt(temp_file_path)
         if isinstance(result, dict) and "error" in result: raise HTTPException(status_code=500, detail=result["error"])
@@ -780,16 +748,16 @@ async def scan_receipt(file: UploadFile = File(...)):
         if os.path.exists(temp_file_path): os.remove(temp_file_path)
 
 @app.post("/api/upload-image")
-async def upload_image(file: UploadFile = File(...)):
+def upload_image(file: UploadFile = File(...)):
     api_key = os.getenv("IMGBB_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="Missing ImgBB API Key")
 
-    image_content = await file.read()
+    image_content = file.file.read()
     b64_image = base64.b64encode(image_content).decode('utf-8')
     
     try:
-        response = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": b64_image})
+        response = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": b64_image}, timeout=10)
         result = response.json()
         if result.get("success"):
             return {"image_path": result["data"]["display_url"]}
@@ -799,13 +767,13 @@ async def upload_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/add_expense")
-async def add_expense(data: ExpenseData):
+def add_expense(data: ExpenseData):
     try:
         expense_data = {
             "group_id": data.group_id, "expense_date": data.expense_date, "category": data.category,
             "description": data.description, "notes": data.notes, "amount": data.amount,
             "currency": data.currency, "exchange_rate": data.exchange_rate, "payer_id": data.payer_id,
-            "image_path": data.image_path, "items": data.items  # 👈 補上寫入 items
+            "image_path": data.image_path, "items": data.items
         }
         exp_res = supabase.table("expenses").insert(expense_data).execute()
         expense_id = exp_res.data[0]["id"]
@@ -819,7 +787,7 @@ async def add_expense(data: ExpenseData):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/expenses")
-async def get_expenses(group_id: int = 1):
+def get_expenses(group_id: int = 1):
     exp_res = supabase.table("expenses").select("*").eq("group_id", group_id).order("expense_date", desc=True).execute()
     mem_res = supabase.table("group_members").select("user_id, user_name").eq("group_id", group_id).execute()
     members_map = {m['user_id']: m['user_name'] for m in mem_res.data}
@@ -831,7 +799,7 @@ async def get_expenses(group_id: int = 1):
     return results
 
 @app.get("/api/expenses/{expense_id}")
-async def get_single_expense(expense_id: int):
+def get_single_expense(expense_id: int):
     exp_res = supabase.table("expenses").select("*").eq("id", expense_id).execute()
     if not exp_res.data:
         raise HTTPException(status_code=404, detail="Expense not found")
@@ -842,13 +810,13 @@ async def get_single_expense(expense_id: int):
     return row
 
 @app.put("/api/expenses/{expense_id}")
-async def update_expense(expense_id: int, data: ExpenseData):
+def update_expense(expense_id: int, data: ExpenseData):
     try:
         expense_data = {
             "expense_date": data.expense_date, "category": data.category, "description": data.description,
             "notes": data.notes, "amount": data.amount, "currency": data.currency,
             "exchange_rate": data.exchange_rate, "payer_id": data.payer_id, "image_path": data.image_path,
-            "items": data.items  # 👈 補上更新 items
+            "items": data.items
         }
         supabase.table("expenses").update(expense_data).eq("id", expense_id).execute()
         
@@ -862,7 +830,7 @@ async def update_expense(expense_id: int, data: ExpenseData):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/expenses/{expense_id}")
-async def delete_expense(expense_id: int, group_id: int, user_name: str, description: str):
+def delete_expense(expense_id: int, group_id: int, user_name: str, description: str):
     try:
         supabase.table("expense_splits").delete().eq("expense_id", expense_id).execute()
         supabase.table("expenses").delete().eq("id", expense_id).execute()
